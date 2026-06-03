@@ -1,0 +1,46 @@
+# Node modules
+node_modules/
+.next/
+.turbo/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+*.egg-info/
+
+# Runtime files (no se deben subir)
+uploads/
+outputs/
+*.log
+run.log
+frontend.log
+
+# Test/debug files
+test-video.mp4
+test-audio.wav
+downloaded-*.wav
+debug-*.js
+probe-test.js
+diag-server.js
+diag-uploads/
+demucs_wrapper_test/
+current_state.png
+ui_*.png
+ss_*.png
+screenshot_*.png
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env files con secrets (sí subimos .env.example)
+.env.local
+backend-node/.env
+backend/.env
+
+# Build artifacts (el usuario hace npm run build localmente)
+frontend/.next/
