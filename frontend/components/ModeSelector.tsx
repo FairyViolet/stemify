@@ -1,6 +1,6 @@
 "use client";
 
-import { Music2, Video, Check } from "lucide-react";
+import { Music2, Video, Mic, Check } from "lucide-react";
 import type { AppMode } from "@/types";
 import { clsx } from "@/lib/utils";
 
@@ -23,6 +23,26 @@ function Waveform({ color }: { color: string }) {
           height={h * 24}
           rx={1.5}
           fill={color}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/* Mini speech waveform decoration */
+function SpeechWave() {
+  const heights = [0.3, 0.5, 0.8, 1, 0.9, 0.6, 0.4, 0.7, 1, 0.8, 0.5, 0.3, 0.6, 0.9, 0.7, 0.4];
+  return (
+    <svg viewBox={`0 0 ${heights.length * 5} 24`} className="w-full h-6 opacity-50" preserveAspectRatio="none">
+      {heights.map((h, i) => (
+        <rect
+          key={i}
+          x={i * 5}
+          y={(1 - h) * 24}
+          width={3}
+          height={h * 24}
+          rx={1.5}
+          fill="#34d399"
         />
       ))}
     </svg>
@@ -77,6 +97,22 @@ const modes = [
     tagBg: "bg-cyan-500/15 text-cyan-300",
     checkBg: "bg-cyan-500",
   },
+  {
+    id: "speech" as AppMode,
+    icon: <Mic className="w-7 h-7" />,
+    title: "Speech to Text",
+    subtitle: "Transcribe audio or video to text with timestamps.",
+    tags: ["Transcripción", "Subtítulos SRT", "Traducción"],
+    decoration: <SpeechWave />,
+    activeGlow: "shadow-[0_0_40px_rgba(52,211,153,0.25)]",
+    activeBorder: "border-emerald-500/70",
+    activeBg: "from-emerald-900/40 to-teal-900/20",
+    idleBg: "from-emerald-900/10 to-teal-900/5",
+    iconBg: "bg-emerald-500/20",
+    iconColor: "text-emerald-300",
+    tagBg: "bg-emerald-500/15 text-emerald-300",
+    checkBg: "bg-emerald-500",
+  },
 ] as const;
 
 export function ModeSelector({ selected, onChange }: Props) {
@@ -85,7 +121,7 @@ export function ModeSelector({ selected, onChange }: Props) {
       <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold mb-3 text-center">
         Step 1 — Choose mode
       </p>
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className="grid sm:grid-cols-3 gap-4">
         {modes.map((m) => {
           const active = selected === m.id;
           return (

@@ -14,7 +14,12 @@ const STEM_LABELS = [
 ];
 
 // Known Python install paths on this machine (checked first for reliability)
+// IMPORTANT: venv paths come first — they have torch/demucs installed
 const KNOWN_PYTHON_PATHS = [
+  // Project venv (has torch, demucs, whisper — always try this first)
+  "S:\\Claude code\\stemify\\venv\\Scripts\\python.exe",
+  path.join(__dirname, "..", "..", "venv", "Scripts", "python.exe"),
+  // System Python fallbacks
   "C:\\Users\\User\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
   "C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
   "C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
@@ -46,15 +51,38 @@ function findPython() {
   return null;
 }
 
-function checkDemucs() {
-  // Try known demucs.exe first
-  for (const p of KNOWN_DEMUCS_PATHS) {
-    if (fs.existsSync(p)) return true;
+// Cache: avoid re-running the (slow) import check on every job
+let _cachedDemucsPython = undefined;
+
+/**
+ * Find a Python interpreter that can ACTUALLY run Demucs — i.e. has
+ * torch, torchaudio, soundfile and demucs all importable. A Python
+ * existing and running `--version` successfully is not enough: some
+ * envs (e.g. a venv set up only for Whisper) have torch but not demucs.
+ */
+function findDemucsPython() {
+  if (_cachedDemucsPython !== undefined) return _cachedDemucsPython;
+
+  const candidates = [...KNOWN_PYTHON_PATHS, "python", "python3", "py"];
+  for (const p of candidates) {
+    const isAbsolute = p.includes("\\") || p.includes("/");
+    if (isAbsolute && !fs.existsSync(p)) continue;
+    const r = spawnSync(
+      p,
+      ["-c", "import torch, torchaudio, soundfile, demucs"],
+      { encoding: "utf8", timeout: 15000, shell: !isAbsolute }
+    );
+    if (r.status === 0) {
+      _cachedDemucsPython = p;
+      return p;
+    }
   }
-  const python = findPython();
-  if (!python) return false;
-  const r = spawnSync(python, ["-m", "demucs", "--help"], { encoding: "utf8", timeout: 5000, shell: true });
-  return r.status === 0;
+  _cachedDemucsPython = null;
+  return null;
+}
+
+function checkDemucs() {
+  return findDemucsPython() !== null;
 }
 
 /**
@@ -64,28 +92,17 @@ function checkDemucs() {
 async function runDemucs(audioPath, outputDir, mode, onProgress) {
   // Use the wrapper script that patches torchaudio to avoid TorchCodec requirement
   const WRAPPER = "C:\\stemify\\demucs_wrapper.py";
-  const python = findPython();
+  const python = findDemucsPython();
   if (!python) {
     throw new Error(
-      "Python no está instalado. Instala Python 3.10+ desde https://python.org y luego ejecuta: pip install demucs"
+      "No se encontró un entorno Python con Demucs instalado correctamente. " +
+      "Ejecuta: pip install demucs soundfile torch torchaudio"
     );
   }
 
-  let executable, args;
-  if (fs.existsSync(WRAPPER)) {
-    executable = python;
-    args = [WRAPPER];
-  } else {
-    // Fallback: try demucs.exe or python -m demucs
-    const demucsExe = KNOWN_DEMUCS_PATHS.find(p => fs.existsSync(p));
-    if (demucsExe) {
-      executable = demucsExe;
-      args = [];
-    } else {
-      executable = python;
-      args = ["-m", "demucs"];
-    }
-  }
+  const isAbsolute = python.includes("\\") || python.includes("/");
+  const executable = python;
+  const args = fs.existsSync(WRAPPER) ? [WRAPPER] : ["-m", "demucs"];
 
   const model = "htdemucs";
   args.push("--out", outputDir, "--name", model, "--filename", "{track}_{stem}.{ext}");
@@ -102,7 +119,7 @@ async function runDemucs(audioPath, outputDir, mode, onProgress) {
   };
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(executable, args, { encoding: "utf8", env });
+    const proc = spawn(executable, args, { encoding: "utf8", env, shell: !isAbsolute });
     let stderr = "";
 
     proc.stderr.on("data", (chunk) => {

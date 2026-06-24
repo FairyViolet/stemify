@@ -8,6 +8,7 @@ const { getJob, updateJob, deleteJob: removeJob, getAllJobs, createJob } = requi
 const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
 const { checkDemucs } = require("./demucs");
+const { runWhisperTranscription } = require("./transcription");
 
 const router = express.Router();
 
@@ -159,7 +160,7 @@ router.get("/jobs/:id", (req, res) => {
 // ──────────────────────────────────────────────
 router.get("/download/:id/:filename", (req, res) => {
   const job = getJob(req.params.id);
-  if (!job) return res.status(404).json({ detail: "Job no encontrado. El servidor puede haberse reiniciado — procesa el archivo de nuevo." });
+  if (!job) return res.status(404).json({ detail: "Job no encontrado. El servidor fue reiniciado — volvé a procesar el archivo." });
   if (job.status !== "completed") return res.status(400).json({ detail: "El job aún no ha terminado." });
 
   const safe = safeName(decodeURIComponent(req.params.filename));
@@ -167,7 +168,7 @@ router.get("/download/:id/:filename", (req, res) => {
   if (!allowed.has(safe)) return res.status(403).json({ detail: "Acceso denegado." });
 
   const filePath = path.join(OUTPUT_DIR, req.params.id, safe);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ detail: `Archivo no encontrado en disco: ${filePath}` });
+  if (!fs.existsSync(filePath)) return res.status(404).json({ detail: "El archivo procesado ya no existe en disco (fue limpiado automáticamente). Volvé a subir el archivo." });
 
   // Explicit headers for cross-origin download support
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -186,6 +187,58 @@ router.delete("/jobs/:id", (req, res) => {
   cleanupJobFiles(req.params.id);
   removeJob(req.params.id);
   res.json({ message: "Job eliminado." });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/transcribe
+// ──────────────────────────────────────────────
+async function processTranscriptionJob(jobId, inputPath, options, outputDir) {
+  updateJob(jobId, { status: "processing", stage: "Iniciando Whisper...", progress: 5 });
+  try {
+    const result = await runWhisperTranscription(inputPath, outputDir, options, (pct, stage) => {
+      updateJob(jobId, { progress: pct, stage });
+    });
+    updateJob(jobId, {
+      status: "completed",
+      progress: 100,
+      stage: "Completado",
+      files: result.files,
+    });
+  } catch (err) {
+    console.error(`[transcribe] job ${jobId} failed:`, err.message);
+    updateJob(jobId, { status: "failed", error: err.message });
+  }
+}
+
+router.post("/transcribe", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const ext = getExt(req.file.originalname);
+  const allowed = new Set([...ALLOWED_AUDIO, ...ALLOWED_VIDEO]);
+  if (!allowed.has(ext)) {
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}` });
+  }
+
+  const targetLanguage = req.body.target_language || "original";
+  const validLanguages = new Set(["original", "en", "es", "pt", "fr"]);
+  if (!validLanguages.has(targetLanguage)) {
+    return res.status(400).json({ detail: `Idioma no válido: ${targetLanguage}` });
+  }
+
+  const jobId = req.__jobId;
+  const job = createJob();
+  job.job_id = jobId;
+  getAllJobs().delete(job.job_id);
+  getAllJobs().set(jobId, job);
+  updateJob(jobId, { stage: "En cola...", progress: 0 });
+
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const options = { language: targetLanguage };
+  processTranscriptionJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
 });
 
 // Multer error handler

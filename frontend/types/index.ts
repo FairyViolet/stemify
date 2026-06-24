@@ -1,4 +1,4 @@
-export type AppMode = "music" | "video";
+export type AppMode = "music" | "video" | "speech";
 
 export type MusicMode = "2stem" | "4stem";
 

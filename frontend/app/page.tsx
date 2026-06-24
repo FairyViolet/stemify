@@ -13,6 +13,7 @@ import { LegalNotice } from "@/components/LegalNotice";
 import { BackendStatusBanner } from "@/components/BackendStatusBanner";
 import { submitMusicJob, submitVideoJob, fetchJob, deleteJob } from "@/lib/api";
 import { useBackendStatus } from "@/lib/useBackendStatus";
+import { SpeechToText } from "@/components/SpeechToText";
 import type { AppMode, MusicMode, Job, VideoOptions } from "@/types";
 
 const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
@@ -203,8 +204,13 @@ export default function HomePage() {
           <ModeSelector selected={appMode} onChange={handleModeChange} />
         )}
 
-        {/* Upload + options */}
-        {appMode && uiState === "idle" && (
+        {/* Speech to Text — self-contained, manages its own state */}
+        {appMode === "speech" && uiState === "idle" && (
+          <SpeechToText onReset={handleReset} />
+        )}
+
+        {/* Upload + options (music / video only) */}
+        {appMode && appMode !== "speech" && uiState === "idle" && (
           <div className="space-y-5">
             {/* Upload step label */}
             <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">

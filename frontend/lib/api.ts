@@ -80,6 +80,32 @@ export async function submitVideoJob(
   return res.json();
 }
 
+export async function submitTranscriptionJob(
+  file: File,
+  targetLanguage: string
+): Promise<{ job_id: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("target_language", targetLanguage);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/api/transcribe`, {
+      method: "POST",
+      body: form,
+    });
+  } catch (err) {
+    throw friendlyError(err);
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail ?? `Error del servidor (${res.status})`;
+    throw new Error(Array.isArray(detail) ? detail.map((d: {msg:string}) => d.msg).join(", ") : detail);
+  }
+  return res.json();
+}
+
 export async function fetchJob(jobId: string): Promise<Job> {
   const res = await fetch(`${BACKEND_URL}/api/jobs/${jobId}`);
   if (!res.ok) throw new Error("Job not found");

@@ -76,8 +76,8 @@ function updateJob(id, patch) {
   const job = jobs.get(id);
   if (!job) return null;
   Object.assign(job, patch);
-  // Persist completed/failed state to disk immediately
-  if (patch.status === "completed" || patch.status === "failed") {
+  // Persist to disk on every status change so jobs survive server restarts
+  if (patch.status) {
     persistJob(job);
   }
   return job;
