@@ -6,6 +6,7 @@ file with per-word highlighting, then burns it into the video with FFmpeg.
 
 Usage:
   python subtitle_worker.py --input <video> --output_dir <dir> --style pop
+                            [--orientation auto|horizontal|vertical]
                             [--model large-v2]
 """
 
@@ -16,6 +17,9 @@ import subprocess
 import sys
 
 FFMPEG_EXE = os.environ.get("STEMIFY_FFMPEG_PATH", "ffmpeg")
+FFPROBE_EXE = os.environ.get("STEMIFY_FFPROBE_PATH", "ffprobe")
+
+REFERENCE_HEIGHT = 1080  # the style presets below are tuned for ~1080px height
 
 
 def emit(obj):
@@ -34,7 +38,29 @@ def ass_time(seconds: float) -> str:
     return f"{h:01d}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def get_video_dimensions(path: str):
+    """Return (width, height) of the input video using ffprobe, or None on failure."""
+    cmd = [
+        FFPROBE_EXE, "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=p=0",
+        path,
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if out.returncode != 0:
+            return None
+        line = out.stdout.strip().splitlines()[0]
+        w_str, h_str = line.split(",")
+        return int(w_str), int(h_str)
+    except Exception:
+        return None
+
+
 # ── Style presets ────────────────────────────────────────────────────────────
+# Sizes below are tuned for a REFERENCE_HEIGHT-tall frame and get scaled to the
+# actual video resolution at runtime (see scale_style()).
 # Colors in ASS are &HAABBGGRR& (alpha-blue-green-red, hex, opaque = 00 alpha)
 STYLES = {
     "pop": {
@@ -45,7 +71,8 @@ STYLES = {
         "outline": "&H00000000",     # black
         "outline_width": 5,
         "alignment": 2,              # bottom-center
-        "margin_v": 90,
+        "margin_v_horizontal": 90,
+        "margin_v_vertical": 230,    # extra clearance for social-media UI overlays
         "pop_scale": True,
     },
     "clean": {
@@ -56,7 +83,8 @@ STYLES = {
         "outline": "&H00000000",
         "outline_width": 3,
         "alignment": 2,
-        "margin_v": 70,
+        "margin_v_horizontal": 70,
+        "margin_v_vertical": 210,
         "pop_scale": False,
     },
     "classic": {
@@ -67,20 +95,39 @@ STYLES = {
         "outline": "&H00000000",
         "outline_width": 3,
         "alignment": 2,
-        "margin_v": 60,
+        "margin_v_horizontal": 60,
+        "margin_v_vertical": 190,
         "pop_scale": False,
     },
 }
 
 
-def build_ass_header(style: dict) -> str:
+def resolve_orientation(orientation: str, width: int, height: int) -> str:
+    if orientation in ("horizontal", "vertical"):
+        return orientation
+    return "vertical" if height > width else "horizontal"
+
+
+def scale_style(style: dict, video_height: int, orientation: str) -> dict:
+    """Scale font/outline/margin from the 1080-reference design to the actual video height."""
+    factor = video_height / REFERENCE_HEIGHT
+    margin_key = "margin_v_vertical" if orientation == "vertical" else "margin_v_horizontal"
+    return {
+        **style,
+        "fontsize": max(12, round(style["fontsize"] * factor)),
+        "outline_width": max(1, round(style["outline_width"] * factor)),
+        "margin_v": max(10, round(style[margin_key] * factor)),
+    }
+
+
+def build_ass_header(style: dict, play_res_x: int, play_res_y: int) -> str:
     return f"""[Script Info]
 Title: Stemify Dynamic Subtitles
 ScriptType: v4.00+
 WrapStyle: 0
 ScaledBorderAndShadow: yes
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {play_res_x}
+PlayResY: {play_res_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -150,10 +197,21 @@ def main():
     parser.add_argument("--input", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--style", default="pop", choices=list(STYLES.keys()))
+    parser.add_argument("--orientation", default="auto", choices=["auto", "horizontal", "vertical"])
     parser.add_argument("--model", default="large-v2")
     args = parser.parse_args()
 
-    style = STYLES[args.style]
+    base_style = STYLES[args.style]
+
+    # ── Step 0: Detect actual video resolution ───────────────────────────────
+    emit({"progress": 2, "stage": "Analizando video..."})
+    dims = get_video_dimensions(args.input)
+    if dims is None:
+        emit({"error": "No se pudo leer la resolución del video con ffprobe."})
+        sys.exit(1)
+    video_w, video_h = dims
+    orientation = resolve_orientation(args.orientation, video_w, video_h)
+    style = scale_style(base_style, video_h, orientation)
 
     # ── Step 1: Load model ──────────────────────────────────────────────────
     emit({"progress": 5, "stage": "Iniciando Whisper..."})
@@ -200,8 +258,10 @@ def main():
     else:
         events = build_ass_events_phrase_level(segments)
 
+    # PlayRes matches the REAL video frame exactly — this is what prevents
+    # distorted/stretched text on vertical (9:16) or any non-16:9 video.
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(build_ass_header(style))
+        f.write(build_ass_header(style, video_w, video_h))
         f.write(events)
 
     emit({"progress": 65, "stage": "Quemando subtítulos en el video..."})
@@ -234,6 +294,7 @@ def main():
     emit({
         "done": True,
         "detected_language": result.get("language", "unknown"),
+        "orientation": orientation,
         "files": [
             {
                 "filename": os.path.basename(out_video),

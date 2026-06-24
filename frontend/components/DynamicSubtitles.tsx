@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Captions, Check, Sparkles } from "lucide-react";
+import { Download, RotateCcw, Captions, Check, Sparkles, Wand2, Monitor, Smartphone } from "lucide-react";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { ProcessingProgress } from "@/components/ProcessingProgress";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { submitSubtitlesJob, fetchJob, deleteJob, getDownloadUrl } from "@/lib/api";
-import type { Job, SubtitleStyle } from "@/types";
+import type { Job, SubtitleStyle, SubtitleOrientation } from "@/types";
 import { clsx } from "@/lib/utils";
 
 type SubsUIState = "idle" | "uploading" | "processing" | "completed" | "failed";
@@ -39,6 +39,34 @@ const STYLE_PRESETS: StylePreset[] = [
   },
 ];
 
+interface OrientationOption {
+  value: SubtitleOrientation;
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+}
+
+const ORIENTATION_OPTIONS: OrientationOption[] = [
+  {
+    value: "auto",
+    label: "Auto-detectar",
+    description: "Lee el video y se adapta solo",
+    icon: <Wand2 className="w-4 h-4" />,
+  },
+  {
+    value: "horizontal",
+    label: "Horizontal",
+    description: "16:9 — YouTube, TV",
+    icon: <Monitor className="w-4 h-4" />,
+  },
+  {
+    value: "vertical",
+    label: "Vertical",
+    description: "9:16 — TikTok, Reels",
+    icon: <Smartphone className="w-4 h-4" />,
+  },
+];
+
 interface Props {
   onReset: () => void;
 }
@@ -46,6 +74,7 @@ interface Props {
 export function DynamicSubtitles({ onReset }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [style, setStyle] = useState<SubtitleStyle>("pop");
+  const [orientation, setOrientation] = useState<SubtitleOrientation>("auto");
   const [uiState, setUiState] = useState<SubsUIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -94,7 +123,7 @@ export function DynamicSubtitles({ onReset }: Props) {
     setJob(null);
 
     try {
-      const result = await submitSubtitlesJob(file, style);
+      const result = await submitSubtitlesJob(file, style, orientation);
       const initial: Job = {
         job_id: result.job_id,
         status: "queued",
@@ -257,6 +286,42 @@ export function DynamicSubtitles({ onReset }: Props) {
                 );
               })}
             </div>
+          </div>
+
+          {/* Orientation picker */}
+          <div className="space-y-3">
+            <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
+              Step 4 — Orientación del video
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {ORIENTATION_OPTIONS.map((opt) => {
+                const active = orientation === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setOrientation(opt.value)}
+                    className={clsx(
+                      "flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-all duration-200",
+                      active
+                        ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/20"
+                        : "border-white/10 bg-white/3 hover:border-amber-500/30 hover:bg-amber-500/5"
+                    )}
+                  >
+                    <span className={active ? "text-amber-400" : "text-white/40"}>{opt.icon}</span>
+                    <span className={clsx("text-xs font-semibold", active ? "text-white" : "text-white/60")}>
+                      {opt.label}
+                    </span>
+                    <span className="text-[10px] text-white/30 text-center leading-tight">{opt.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {orientation === "auto" && (
+              <p className="text-[11px] text-white/25 flex items-center gap-1">
+                <span>ℹ</span>
+                Detecta automáticamente si tu video es horizontal o vertical y ajusta tamaño de texto y posición.
+              </p>
+            )}
           </div>
 
           {/* Submit button */}

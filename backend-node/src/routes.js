@@ -277,6 +277,12 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
     return res.status(400).json({ detail: `Estilo no válido: ${style}` });
   }
 
+  const orientation = req.body.orientation || "auto";
+  const validOrientations = new Set(["auto", "horizontal", "vertical"]);
+  if (!validOrientations.has(orientation)) {
+    return res.status(400).json({ detail: `Orientación no válida: ${orientation}` });
+  }
+
   const jobId = req.__jobId;
   getAllJobs().set(jobId, {
     job_id: jobId, status: "queued", progress: 0,
@@ -286,7 +292,7 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const options = { style };
+  const options = { style, orientation };
   processSubtitlesJob(jobId, req.file.path, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });

@@ -108,11 +108,13 @@ export async function submitTranscriptionJob(
 
 export async function submitSubtitlesJob(
   file: File,
-  style: string
+  style: string,
+  orientation: string
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("style", style);
+  form.append("orientation", orientation);
 
   let res: Response;
   try {

@@ -4,6 +4,8 @@ export type MusicMode = "2stem" | "4stem";
 
 export type SubtitleStyle = "pop" | "clean" | "classic";
 
+export type SubtitleOrientation = "auto" | "horizontal" | "vertical";
+
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface JobFile {

@@ -2,6 +2,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const ffmpegPath = require("ffmpeg-static");
+const ffprobePath = require("@ffprobe-installer/ffprobe").path;
 const { findPython } = require("./transcription");
 
 const FFMPEG_DIR = path.dirname(ffmpegPath);
@@ -16,7 +17,7 @@ const WORKER_SCRIPT = path.resolve(
  *
  * @param {string} inputPath - Absolute path to the uploaded video
  * @param {string} outputDir - Absolute path to the output directory
- * @param {{ style?: "pop"|"clean"|"classic", model?: string }} options
+ * @param {{ style?: "pop"|"clean"|"classic", orientation?: "auto"|"horizontal"|"vertical", model?: string }} options
  * @param {(progress: number, stage: string) => void} onProgress
  * @returns {Promise<{ files: Array }>}
  */
@@ -34,6 +35,7 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
   }
 
   const style = options.style || "pop";
+  const orientation = options.orientation || "auto";
   const model = options.model || "large-v2";
 
   const args = [
@@ -41,6 +43,7 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
     "--input", inputPath,
     "--output_dir", outputDir,
     "--style", style,
+    "--orientation", orientation,
     "--model", model,
   ];
 
@@ -55,6 +58,7 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
         PYTHONIOENCODING: "utf-8",
         PATH: `${FFMPEG_DIR}${path.delimiter}${process.env.PATH || ""}`,
         STEMIFY_FFMPEG_PATH: ffmpegPath,
+        STEMIFY_FFPROBE_PATH: ffprobePath,
       },
     });
 
