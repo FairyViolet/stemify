@@ -9,6 +9,7 @@ const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
 const { checkDemucs } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
+const { runBurnSubtitles } = require("./subtitles");
 
 const router = express.Router();
 
@@ -237,6 +238,56 @@ router.post("/transcribe", attachJobId, upload.single("file"), async (req, res) 
 
   const options = { language: targetLanguage };
   processTranscriptionJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/subtitles — burn dynamic word-level subtitles into a video
+// ──────────────────────────────────────────────
+async function processSubtitlesJob(jobId, inputPath, options, outputDir) {
+  updateJob(jobId, { status: "processing", stage: "Iniciando Whisper...", progress: 5 });
+  try {
+    const result = await runBurnSubtitles(inputPath, outputDir, options, (pct, stage) => {
+      updateJob(jobId, { progress: pct, stage });
+    });
+    updateJob(jobId, {
+      status: "completed",
+      progress: 100,
+      stage: "Completado",
+      files: result.files,
+    });
+  } catch (err) {
+    console.error(`[subtitles] job ${jobId} failed:`, err.message);
+    updateJob(jobId, { status: "failed", error: err.message });
+  }
+}
+
+router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const ext = getExt(req.file.originalname);
+  if (!ALLOWED_VIDEO.has(ext)) {
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+  }
+
+  const style = req.body.style || "pop";
+  const validStyles = new Set(["pop", "clean", "classic"]);
+  if (!validStyles.has(style)) {
+    return res.status(400).json({ detail: `Estilo no válido: ${style}` });
+  }
+
+  const jobId = req.__jobId;
+  getAllJobs().set(jobId, {
+    job_id: jobId, status: "queued", progress: 0,
+    stage: "En cola...", error: null, files: [], created_at: Date.now(),
+  });
+
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const options = { style };
+  processSubtitlesJob(jobId, req.file.path, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
 });

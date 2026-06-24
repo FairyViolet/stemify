@@ -14,6 +14,7 @@ import { BackendStatusBanner } from "@/components/BackendStatusBanner";
 import { submitMusicJob, submitVideoJob, fetchJob, deleteJob } from "@/lib/api";
 import { useBackendStatus } from "@/lib/useBackendStatus";
 import { SpeechToText } from "@/components/SpeechToText";
+import { DynamicSubtitles } from "@/components/DynamicSubtitles";
 import type { AppMode, MusicMode, Job, VideoOptions } from "@/types";
 
 const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
@@ -209,8 +210,13 @@ export default function HomePage() {
           <SpeechToText onReset={handleReset} />
         )}
 
+        {/* Dynamic Subtitles — self-contained, manages its own state */}
+        {appMode === "subtitles" && uiState === "idle" && (
+          <DynamicSubtitles onReset={handleReset} />
+        )}
+
         {/* Upload + options (music / video only) */}
-        {appMode && appMode !== "speech" && uiState === "idle" && (
+        {appMode && appMode !== "speech" && appMode !== "subtitles" && uiState === "idle" && (
           <div className="space-y-5">
             {/* Upload step label */}
             <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Music2, Video, Mic, Check } from "lucide-react";
+import { Music2, Video, Mic, Captions, Check } from "lucide-react";
 import type { AppMode } from "@/types";
 import { clsx } from "@/lib/utils";
 
@@ -64,6 +64,18 @@ function FilmStrip() {
   );
 }
 
+/* Mini karaoke-word decoration — simulates active-word highlight */
+function KaraokeWords() {
+  return (
+    <svg viewBox="0 0 90 24" className="w-full h-6 opacity-70">
+      <text x="2" y="17" fontSize="10" fontWeight="700" fill="#ffffff" opacity="0.6">this</text>
+      <text x="22" y="17" fontSize="13" fontWeight="800" fill="#fbbf24">IS</text>
+      <text x="38" y="17" fontSize="10" fontWeight="700" fill="#ffffff" opacity="0.6">so</text>
+      <text x="54" y="17" fontSize="10" fontWeight="700" fill="#ffffff" opacity="0.6">cool</text>
+    </svg>
+  );
+}
+
 const modes = [
   {
     id: "music" as AppMode,
@@ -113,6 +125,22 @@ const modes = [
     tagBg: "bg-emerald-500/15 text-emerald-300",
     checkBg: "bg-emerald-500",
   },
+  {
+    id: "subtitles" as AppMode,
+    icon: <Captions className="w-7 h-7" />,
+    title: "Subtítulos Dinámicos",
+    subtitle: "Quema subtítulos animados estilo TikTok sobre tu video.",
+    tags: ["Karaoke", "Word-by-word", "Quemado en video"],
+    decoration: <KaraokeWords />,
+    activeGlow: "shadow-[0_0_40px_rgba(251,191,36,0.25)]",
+    activeBorder: "border-amber-500/70",
+    activeBg: "from-amber-900/40 to-orange-900/20",
+    idleBg: "from-amber-900/10 to-orange-900/5",
+    iconBg: "bg-amber-500/20",
+    iconColor: "text-amber-300",
+    tagBg: "bg-amber-500/15 text-amber-300",
+    checkBg: "bg-amber-500",
+  },
 ] as const;
 
 export function ModeSelector({ selected, onChange }: Props) {
@@ -121,7 +149,7 @@ export function ModeSelector({ selected, onChange }: Props) {
       <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold mb-3 text-center">
         Step 1 — Choose mode
       </p>
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         {modes.map((m) => {
           const active = selected === m.id;
           return (

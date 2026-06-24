@@ -1,0 +1,287 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, RotateCcw, Captions, Check, Sparkles } from "lucide-react";
+import { UploadDropzone } from "@/components/UploadDropzone";
+import { ProcessingProgress } from "@/components/ProcessingProgress";
+import { ErrorMessage } from "@/components/ErrorMessage";
+import { submitSubtitlesJob, fetchJob, deleteJob, getDownloadUrl } from "@/lib/api";
+import type { Job, SubtitleStyle } from "@/types";
+import { clsx } from "@/lib/utils";
+
+type SubsUIState = "idle" | "uploading" | "processing" | "completed" | "failed";
+
+interface StylePreset {
+  value: SubtitleStyle;
+  label: string;
+  description: string;
+  preview: { active: string; rest: string[] };
+}
+
+const STYLE_PRESETS: StylePreset[] = [
+  {
+    value: "pop",
+    label: "Pop (TikTok)",
+    description: "Texto grande, palabra activa en amarillo con efecto de rebote.",
+    preview: { active: "IS", rest: ["this", "so", "cool"] },
+  },
+  {
+    value: "clean",
+    label: "Clean",
+    description: "Más sutil — palabra activa resaltada en celeste, sin animación.",
+    preview: { active: "is", rest: ["this", "so", "cool"] },
+  },
+  {
+    value: "classic",
+    label: "Clásico",
+    description: "Subtítulo blanco tradicional por frase, sin resaltado de palabra.",
+    preview: { active: "", rest: ["this is so cool"] },
+  },
+];
+
+interface Props {
+  onReset: () => void;
+}
+
+export function DynamicSubtitles({ onReset }: Props) {
+  const [file, setFile] = useState<File | null>(null);
+  const [style, setStyle] = useState<SubtitleStyle>("pop");
+  const [uiState, setUiState] = useState<SubsUIState>("idle");
+  const [job, setJob] = useState<Job | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentJobRef = useRef<string | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(
+    (jobId: string) => {
+      currentJobRef.current = jobId;
+      pollRef.current = setInterval(async () => {
+        if (currentJobRef.current !== jobId) return;
+        try {
+          const updated = await fetchJob(jobId);
+          setJob(updated);
+          if (updated.status === "completed") {
+            stopPolling();
+            setUiState("completed");
+          } else if (updated.status === "failed") {
+            stopPolling();
+            setUiState("failed");
+          }
+        } catch {
+          // ignore transient errors
+        }
+      }, 1500);
+    },
+    [stopPolling]
+  );
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
+  const handleSubmit = async () => {
+    if (!file) return;
+    setSubmitError(null);
+    setUiState("uploading");
+    setJob(null);
+
+    try {
+      const result = await submitSubtitlesJob(file, style);
+      const initial: Job = {
+        job_id: result.job_id,
+        status: "queued",
+        progress: 0,
+        stage: "En cola...",
+        error: null,
+        files: [],
+      };
+      setJob(initial);
+      setUiState("processing");
+      startPolling(result.job_id);
+    } catch (err) {
+      setSubmitError((err as Error).message);
+      setUiState("failed");
+    }
+  };
+
+  const handleRetry = useCallback(() => {
+    stopPolling();
+    if (job?.job_id) deleteJob(job.job_id).catch(() => {});
+    setUiState("idle");
+    setJob(null);
+    setSubmitError(null);
+  }, [job, stopPolling]);
+
+  const handleFullReset = useCallback(() => {
+    stopPolling();
+    if (job?.job_id) deleteJob(job.job_id).catch(() => {});
+    onReset();
+  }, [job, stopPolling, onReset]);
+
+  const showProgress = (uiState === "uploading" || uiState === "processing") && job;
+  const showCompleted = uiState === "completed" && job;
+  const showFailed = uiState === "failed";
+
+  // ── Completed state ─────────────────────────────────────────────────────
+  if (showCompleted && job) {
+    const videoFile = job.files[0];
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/8 px-5 py-4">
+          <Check className="w-5 h-5 text-emerald-400" />
+          <div className="flex-1">
+            <p className="text-emerald-300 font-semibold">¡Video subtitulado listo!</p>
+            <p className="text-emerald-400/50 text-xs mt-0.5">
+              Subtítulos {STYLE_PRESETS.find((s) => s.value === style)?.label} quemados directamente en el video
+            </p>
+          </div>
+          <Sparkles className="w-4 h-4 text-emerald-400/50" />
+        </div>
+
+        {videoFile && (
+          <a
+            href={getDownloadUrl(job.job_id, videoFile.filename)}
+            download={videoFile.filename}
+            className="flex items-center justify-center gap-2 w-full rounded-xl py-3.5 px-4
+              bg-amber-500/15 border border-amber-500/30 text-amber-300
+              hover:bg-amber-500/25 hover:border-amber-500/50 transition-all text-sm font-semibold"
+          >
+            <Download className="w-4 h-4" />
+            Descargar {videoFile.filename}
+          </a>
+        )}
+
+        <button
+          onClick={handleRetry}
+          className="w-full py-3 rounded-xl border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 transition-all text-sm"
+        >
+          Subtitular otro video
+        </button>
+      </div>
+    );
+  }
+
+  // ── Uploading placeholder ────────────────────────────────────────────────
+  if (uiState === "uploading" && !job) {
+    return (
+      <div className="rounded-2xl border border-white/10 p-6 flex items-center gap-3"
+        style={{ background: "rgba(15,12,30,0.6)" }}>
+        <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+        <div>
+          <p className="text-white/80 text-sm font-medium">Subiendo video…</p>
+          <p className="text-white/30 text-xs">Esto puede tardar un momento</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Processing progress ──────────────────────────────────────────────────
+  if (showProgress) {
+    return <ProcessingProgress job={job} />;
+  }
+
+  // ── Error state ──────────────────────────────────────────────────────────
+  if (showFailed) {
+    return (
+      <ErrorMessage
+        message={submitError ?? job?.error ?? "Ha ocurrido un error al generar los subtítulos."}
+        onRetry={handleRetry}
+        onReset={handleFullReset}
+      />
+    );
+  }
+
+  // ── Idle state ───────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-5">
+      <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
+        Step 2 — Sube tu video
+      </p>
+
+      <UploadDropzone mode="subtitles" file={file} onFile={setFile} />
+
+      {file && (
+        <>
+          {/* Style picker */}
+          <div className="space-y-3">
+            <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
+              Step 3 — Elige el estilo
+            </p>
+            <div className="grid gap-3">
+              {STYLE_PRESETS.map((preset) => {
+                const active = style === preset.value;
+                return (
+                  <button
+                    key={preset.value}
+                    onClick={() => setStyle(preset.value)}
+                    className={clsx(
+                      "text-left rounded-2xl border p-4 transition-all duration-200",
+                      active
+                        ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/20"
+                        : "border-white/10 bg-white/3 hover:border-amber-500/30 hover:bg-amber-500/5"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white font-semibold text-sm">{preset.label}</span>
+                      {active && (
+                        <div className="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-white/40 text-xs mb-3">{preset.description}</p>
+
+                    {/* Mini preview */}
+                    <div className="rounded-lg bg-black/40 px-4 py-3 flex items-center justify-center gap-1.5">
+                      {preset.preview.rest.map((w, i) => (
+                        <span key={i} className="text-white/70 text-xs font-bold">{w}</span>
+                      ))}
+                      {preset.preview.active && (
+                        <span className={clsx(
+                          "text-sm font-extrabold",
+                          preset.value === "pop" ? "text-amber-400 scale-110" : "text-cyan-300"
+                        )}>
+                          {preset.preview.active}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Submit button */}
+          <div className="pt-1 space-y-2">
+            <button
+              onClick={handleSubmit}
+              className="relative w-full py-4 rounded-2xl font-bold text-white text-sm transition-all duration-200
+                focus:outline-none focus:ring-2 focus:ring-amber-500/50
+                btn-glow hover:scale-[1.02] active:scale-[0.99]"
+              style={{ background: "linear-gradient(135deg, #d97706, #f59e0b, #fbbf24)" }}
+            >
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                <Captions className="w-4 h-4" />
+                Generar Subtítulos Dinámicos
+              </span>
+              <div className="absolute inset-0 rounded-2xl overflow-hidden">
+                <div className="shimmer w-full h-full" />
+              </div>
+            </button>
+            <p className="text-center text-white/20 text-[11px]">
+              El modelo Whisper large-v2 se descargará en el primer uso (~3 GB). Quemar subtítulos requiere re-codificar el video.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
