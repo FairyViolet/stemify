@@ -12,16 +12,10 @@ const WORKER_SCRIPT = path.resolve(
 );
 
 /**
- * Transcribe a video with word-level timestamps, build a karaoke-style
- * .ass subtitle file, and burn it into the video with FFmpeg.
- *
- * @param {string} inputPath - Absolute path to the uploaded video
- * @param {string} outputDir - Absolute path to the output directory
- * @param {{ style?: "pop"|"clean"|"classic", orientation?: "auto"|"horizontal"|"vertical", model?: string }} options
- * @param {(progress: number, stage: string) => void} onProgress
- * @returns {Promise<{ files: Array }>}
+ * Spawn subtitle_worker.py with the given CLI args and stream its JSON
+ * progress lines back via onProgress. Resolves with the final "done" object.
  */
-async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
+function runWorker(args, onProgress) {
   const python = findPython();
   if (!python) {
     throw new Error(
@@ -29,23 +23,9 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
       "Ejecuta: pip install openai-whisper torch"
     );
   }
-
   if (!fs.existsSync(WORKER_SCRIPT)) {
     throw new Error(`Worker script no encontrado: ${WORKER_SCRIPT}`);
   }
-
-  const style = options.style || "pop";
-  const orientation = options.orientation || "auto";
-  const model = options.model || "large-v2";
-
-  const args = [
-    WORKER_SCRIPT,
-    "--input", inputPath,
-    "--output_dir", outputDir,
-    "--style", style,
-    "--orientation", orientation,
-    "--model", model,
-  ];
 
   console.log(`[subtitles] running: ${python} ${args.join(" ")}`);
   const isAbsolute = python.includes("\\") || python.includes("/");
@@ -107,7 +87,7 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
         return reject(new Error("El worker terminó sin retornar resultados."));
       }
 
-      resolve({ files: result.files || [] });
+      resolve(result);
     });
 
     proc.on("error", (err) => {
@@ -116,4 +96,78 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
   });
 }
 
-module.exports = { runBurnSubtitles };
+/**
+ * Fast path: transcribe a video and burn karaoke-style subtitles in one shot.
+ *
+ * @param {{ style?: "pop"|"clean"|"classic", orientation?: "auto"|"horizontal"|"vertical", model?: string }} options
+ */
+async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
+  const style = options.style || "pop";
+  const orientation = options.orientation || "auto";
+  const model = options.model || "large-v2";
+
+  const result = await runWorker([
+    WORKER_SCRIPT,
+    "--mode", "full",
+    "--input", inputPath,
+    "--output_dir", outputDir,
+    "--style", style,
+    "--orientation", orientation,
+    "--model", model,
+  ], onProgress);
+
+  return { files: result.files || [] };
+}
+
+/**
+ * Transcribe only — returns word-level segments for the manual emphasis editor.
+ *
+ * @param {{ model?: string }} options
+ */
+async function runTranscribeOnly(inputPath, options, onProgress) {
+  const model = options.model || "large-v2";
+
+  const result = await runWorker([
+    WORKER_SCRIPT,
+    "--mode", "transcribe",
+    "--input", inputPath,
+    "--output_dir", path.dirname(inputPath), // unused in this mode, but required by argparse
+    "--model", model,
+  ], onProgress);
+
+  return {
+    segments: result.segments || [],
+    detectedLanguage: result.detected_language || "unknown",
+  };
+}
+
+/**
+ * Render only — burn pre-supplied (possibly user-edited) segments into the
+ * video, skipping transcription entirely.
+ *
+ * @param {Array} segments - word-level segments, words may carry
+ *   { color: "#RRGGBB", sizeMultiplier: number } overrides
+ * @param {{ style?: string, orientation?: string }} options
+ */
+async function runRenderOnly(inputPath, outputDir, segments, options, onProgress) {
+  const style = options.style || "pop";
+  const orientation = options.orientation || "auto";
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  const segmentsPath = path.join(outputDir, "segments_input.json");
+  fs.writeFileSync(segmentsPath, JSON.stringify(segments), "utf8");
+
+  const result = await runWorker([
+    WORKER_SCRIPT,
+    "--mode", "render",
+    "--input", inputPath,
+    "--output_dir", outputDir,
+    "--style", style,
+    "--orientation", orientation,
+    "--segments_json", segmentsPath,
+  ], onProgress);
+
+  return { files: result.files || [] };
+}
+
+module.exports = { runBurnSubtitles, runTranscribeOnly, runRenderOnly };

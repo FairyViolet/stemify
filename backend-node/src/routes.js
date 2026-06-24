@@ -9,7 +9,7 @@ const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
 const { checkDemucs } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
-const { runBurnSubtitles } = require("./subtitles");
+const { runBurnSubtitles, runTranscribeOnly, runRenderOnly } = require("./subtitles");
 
 const router = express.Router();
 
@@ -153,6 +153,7 @@ router.get("/jobs/:id", (req, res) => {
     stage: job.stage,
     error: job.error,
     files: job.files,
+    segments: job.segments ?? null,
   });
 });
 
@@ -294,6 +295,111 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
 
   const options = { style, orientation };
   processSubtitlesJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/subtitles/transcribe — transcribe only (for the manual emphasis editor)
+// ──────────────────────────────────────────────
+async function processTranscribeOnlyJob(jobId, inputPath, options) {
+  updateJob(jobId, { status: "processing", stage: "Iniciando Whisper...", progress: 5 });
+  try {
+    const result = await runTranscribeOnly(inputPath, options, (pct, stage) => {
+      updateJob(jobId, { progress: pct, stage });
+    });
+    updateJob(jobId, {
+      status: "completed",
+      progress: 100,
+      stage: "Transcripción lista",
+      segments: result.segments,
+      files: [],
+    });
+  } catch (err) {
+    console.error(`[subtitles/transcribe] job ${jobId} failed:`, err.message);
+    updateJob(jobId, { status: "failed", error: err.message });
+  }
+}
+
+router.post("/subtitles/transcribe", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const ext = getExt(req.file.originalname);
+  if (!ALLOWED_VIDEO.has(ext)) {
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+  }
+
+  const jobId = req.__jobId;
+  getAllJobs().set(jobId, {
+    job_id: jobId, status: "queued", progress: 0,
+    stage: "En cola...", error: null, files: [], segments: null, created_at: Date.now(),
+  });
+
+  // No outputDir needed yet — the uploaded video stays in uploads/{jobId}/
+  // and is reused by /subtitles/render/:jobId below.
+  processTranscribeOnlyJob(jobId, req.file.path, {}).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/subtitles/render/:jobId — burn (possibly edited) segments
+// into the SAME video uploaded during the /transcribe step above.
+// ──────────────────────────────────────────────
+async function processRenderJob(jobId, inputPath, segments, options, outputDir) {
+  updateJob(jobId, { status: "processing", stage: "Generando subtítulos...", progress: 10, files: [] });
+  try {
+    const result = await runRenderOnly(inputPath, outputDir, segments, options, (pct, stage) => {
+      updateJob(jobId, { progress: pct, stage });
+    });
+    updateJob(jobId, {
+      status: "completed",
+      progress: 100,
+      stage: "Completado",
+      files: result.files,
+    });
+  } catch (err) {
+    console.error(`[subtitles/render] job ${jobId} failed:`, err.message);
+    updateJob(jobId, { status: "failed", error: err.message });
+  }
+}
+
+router.post("/subtitles/render/:jobId", (req, res) => {
+  const jobId = req.params.jobId;
+  const job = getJob(jobId);
+  if (!job) return res.status(404).json({ detail: "Job no encontrado. Volvé a subir el video." });
+
+  const uploadDir = path.join(UPLOAD_DIR, jobId);
+  if (!fs.existsSync(uploadDir)) {
+    return res.status(404).json({ detail: "El video original ya no está disponible. Volvé a subirlo." });
+  }
+  const uploadedFiles = fs.readdirSync(uploadDir);
+  if (uploadedFiles.length === 0) {
+    return res.status(404).json({ detail: "El video original ya no está disponible. Volvé a subirlo." });
+  }
+  const inputPath = path.join(uploadDir, uploadedFiles[0]);
+
+  const { style, orientation, segments } = req.body || {};
+
+  const validStyles = new Set(["pop", "clean", "classic"]);
+  const finalStyle = style || "pop";
+  if (!validStyles.has(finalStyle)) {
+    return res.status(400).json({ detail: `Estilo no válido: ${finalStyle}` });
+  }
+
+  const validOrientations = new Set(["auto", "horizontal", "vertical"]);
+  const finalOrientation = orientation || "auto";
+  if (!validOrientations.has(finalOrientation)) {
+    return res.status(400).json({ detail: `Orientación no válida: ${finalOrientation}` });
+  }
+
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return res.status(400).json({ detail: "Faltan los segmentos de texto a quemar." });
+  }
+
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  const options = { style: finalStyle, orientation: finalOrientation };
+  processRenderJob(jobId, inputPath, segments, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
 });

@@ -6,6 +6,21 @@ export type SubtitleStyle = "pop" | "clean" | "classic";
 
 export type SubtitleOrientation = "auto" | "horizontal" | "vertical";
 
+export interface SubtitleWord {
+  word: string;
+  start: number;
+  end: number;
+  color?: string;          // hex "#RRGGBB" manual override
+  sizeMultiplier?: number; // e.g. 1.5 = 150% size, manual override
+}
+
+export interface SubtitleSegment {
+  start: number;
+  end: number;
+  text: string;
+  words: SubtitleWord[];
+}
+
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface JobFile {
@@ -21,6 +36,7 @@ export interface Job {
   stage: string;
   error: string | null;
   files: JobFile[];
+  segments?: SubtitleSegment[] | null;
 }
 
 export interface VideoOptions {

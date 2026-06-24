@@ -1,15 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Captions, Check, Sparkles, Wand2, Monitor, Smartphone } from "lucide-react";
+import { Download, RotateCcw, Captions, Check, Sparkles, Wand2, Monitor, Smartphone, PenLine, Zap } from "lucide-react";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { ProcessingProgress } from "@/components/ProcessingProgress";
 import { ErrorMessage } from "@/components/ErrorMessage";
-import { submitSubtitlesJob, fetchJob, deleteJob, getDownloadUrl } from "@/lib/api";
-import type { Job, SubtitleStyle, SubtitleOrientation } from "@/types";
+import { WordEmphasisEditor } from "@/components/WordEmphasisEditor";
+import {
+  submitSubtitlesJob,
+  submitTranscribeOnlyJob,
+  submitRenderJob,
+  fetchJob,
+  deleteJob,
+  getDownloadUrl,
+} from "@/lib/api";
+import type { Job, SubtitleStyle, SubtitleOrientation, SubtitleSegment } from "@/types";
 import { clsx } from "@/lib/utils";
 
-type SubsUIState = "idle" | "uploading" | "processing" | "completed" | "failed";
+type SubsUIState = "idle" | "uploading" | "processing" | "editing" | "completed" | "failed";
+type PendingAction = "full" | "transcribe" | "render";
 
 interface StylePreset {
   value: SubtitleStyle;
@@ -78,9 +87,11 @@ export function DynamicSubtitles({ onReset }: Props) {
   const [uiState, setUiState] = useState<SubsUIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [segments, setSegments] = useState<SubtitleSegment[] | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentJobRef = useRef<string | null>(null);
+  const pendingActionRef = useRef<PendingAction>("full");
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -99,7 +110,12 @@ export function DynamicSubtitles({ onReset }: Props) {
           setJob(updated);
           if (updated.status === "completed") {
             stopPolling();
-            setUiState("completed");
+            if (pendingActionRef.current === "transcribe") {
+              setSegments(updated.segments ?? []);
+              setUiState("editing");
+            } else {
+              setUiState("completed");
+            }
           } else if (updated.status === "failed") {
             stopPolling();
             setUiState("failed");
@@ -116,24 +132,54 @@ export function DynamicSubtitles({ onReset }: Props) {
     return () => stopPolling();
   }, [stopPolling]);
 
-  const handleSubmit = async () => {
+  // ── Fast path: transcribe + burn in one shot ────────────────────────────
+  const handleSubmitFast = async () => {
     if (!file) return;
+    pendingActionRef.current = "full";
     setSubmitError(null);
     setUiState("uploading");
     setJob(null);
 
     try {
       const result = await submitSubtitlesJob(file, style, orientation);
-      const initial: Job = {
-        job_id: result.job_id,
-        status: "queued",
-        progress: 0,
-        stage: "En cola...",
-        error: null,
-        files: [],
-      };
-      setJob(initial);
+      setJob({ job_id: result.job_id, status: "queued", progress: 0, stage: "En cola...", error: null, files: [] });
       setUiState("processing");
+      startPolling(result.job_id);
+    } catch (err) {
+      setSubmitError((err as Error).message);
+      setUiState("failed");
+    }
+  };
+
+  // ── Custom path step 1: transcribe only, then show the word editor ──────
+  const handleStartCustomize = async () => {
+    if (!file) return;
+    pendingActionRef.current = "transcribe";
+    setSubmitError(null);
+    setUiState("uploading");
+    setJob(null);
+
+    try {
+      const result = await submitTranscribeOnlyJob(file);
+      setJob({ job_id: result.job_id, status: "queued", progress: 0, stage: "En cola...", error: null, files: [] });
+      setUiState("processing");
+      startPolling(result.job_id);
+    } catch (err) {
+      setSubmitError((err as Error).message);
+      setUiState("failed");
+    }
+  };
+
+  // ── Custom path step 2: burn the (edited) segments into the video ───────
+  const handleRenderEdited = async () => {
+    if (!job || !segments) return;
+    pendingActionRef.current = "render";
+    setSubmitError(null);
+    setUiState("processing");
+
+    try {
+      const result = await submitRenderJob(job.job_id, style, orientation, segments);
+      setJob({ job_id: result.job_id, status: "queued", progress: 0, stage: "En cola...", error: null, files: [] });
       startPolling(result.job_id);
     } catch (err) {
       setSubmitError((err as Error).message);
@@ -146,6 +192,7 @@ export function DynamicSubtitles({ onReset }: Props) {
     if (job?.job_id) deleteJob(job.job_id).catch(() => {});
     setUiState("idle");
     setJob(null);
+    setSegments(null);
     setSubmitError(null);
   }, [job, stopPolling]);
 
@@ -156,6 +203,7 @@ export function DynamicSubtitles({ onReset }: Props) {
   }, [job, stopPolling, onReset]);
 
   const showProgress = (uiState === "uploading" || uiState === "processing") && job;
+  const showEditing = uiState === "editing" && segments;
   const showCompleted = uiState === "completed" && job;
   const showFailed = uiState === "failed";
 
@@ -212,9 +260,41 @@ export function DynamicSubtitles({ onReset }: Props) {
     );
   }
 
-  // ── Processing progress ──────────────────────────────────────────────────
+  // ── Processing progress (transcribing / rendering / full pipeline) ───────
   if (showProgress) {
     return <ProcessingProgress job={job} />;
+  }
+
+  // ── Word emphasis editor ─────────────────────────────────────────────────
+  if (showEditing && segments) {
+    return (
+      <div className="space-y-5">
+        <WordEmphasisEditor segments={segments} onChange={setSegments} />
+        <div className="pt-1 space-y-2">
+          <button
+            onClick={handleRenderEdited}
+            className="relative w-full py-4 rounded-2xl font-bold text-white text-sm transition-all duration-200
+              focus:outline-none focus:ring-2 focus:ring-amber-500/50
+              btn-glow hover:scale-[1.02] active:scale-[0.99]"
+            style={{ background: "linear-gradient(135deg, #d97706, #f59e0b, #fbbf24)" }}
+          >
+            <span className="relative z-10 flex items-center justify-center gap-2">
+              <Captions className="w-4 h-4" />
+              Generar Video con Subtítulos
+            </span>
+            <div className="absolute inset-0 rounded-2xl overflow-hidden">
+              <div className="shimmer w-full h-full" />
+            </div>
+          </button>
+          <button
+            onClick={handleRetry}
+            className="w-full py-2.5 rounded-xl text-white/40 hover:text-white/70 transition-colors text-xs"
+          >
+            Empezar de nuevo
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // ── Error state ──────────────────────────────────────────────────────────
@@ -324,23 +404,40 @@ export function DynamicSubtitles({ onReset }: Props) {
             )}
           </div>
 
-          {/* Submit button */}
-          <div className="pt-1 space-y-2">
+          {/* Action choice: fast vs. customize */}
+          <div className="space-y-3">
+            <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
+              Step 5 — ¿Cómo querés generarlo?
+            </p>
+
             <button
-              onClick={handleSubmit}
+              onClick={handleSubmitFast}
               className="relative w-full py-4 rounded-2xl font-bold text-white text-sm transition-all duration-200
                 focus:outline-none focus:ring-2 focus:ring-amber-500/50
                 btn-glow hover:scale-[1.02] active:scale-[0.99]"
               style={{ background: "linear-gradient(135deg, #d97706, #f59e0b, #fbbf24)" }}
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
-                <Captions className="w-4 h-4" />
-                Generar Subtítulos Dinámicos
+                <Zap className="w-4 h-4" />
+                Generar directamente
               </span>
               <div className="absolute inset-0 rounded-2xl overflow-hidden">
                 <div className="shimmer w-full h-full" />
               </div>
             </button>
+
+            <button
+              onClick={handleStartCustomize}
+              className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-200
+                border border-amber-500/30 text-amber-300 bg-amber-500/8
+                hover:bg-amber-500/15 hover:border-amber-500/50"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <PenLine className="w-4 h-4" />
+                Revisar y destacar palabras clave
+              </span>
+            </button>
+
             <p className="text-center text-white/20 text-[11px]">
               El modelo Whisper large-v2 se descargará en el primer uso (~3 GB). Quemar subtítulos requiere re-codificar el video.
             </p>

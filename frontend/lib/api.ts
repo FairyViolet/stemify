@@ -1,4 +1,4 @@
-import type { Job, BackendStatus, VideoOptions } from "@/types";
+import type { Job, BackendStatus, VideoOptions, SubtitleSegment } from "@/types";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -121,6 +121,53 @@ export async function submitSubtitlesJob(
     res = await fetch(`${BACKEND_URL}/api/subtitles`, {
       method: "POST",
       body: form,
+    });
+  } catch (err) {
+    throw friendlyError(err);
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail ?? `Error del servidor (${res.status})`;
+    throw new Error(Array.isArray(detail) ? detail.map((d: {msg:string}) => d.msg).join(", ") : detail);
+  }
+  return res.json();
+}
+
+export async function submitTranscribeOnlyJob(file: File): Promise<{ job_id: string }> {
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/api/subtitles/transcribe`, {
+      method: "POST",
+      body: form,
+    });
+  } catch (err) {
+    throw friendlyError(err);
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail ?? `Error del servidor (${res.status})`;
+    throw new Error(Array.isArray(detail) ? detail.map((d: {msg:string}) => d.msg).join(", ") : detail);
+  }
+  return res.json();
+}
+
+export async function submitRenderJob(
+  jobId: string,
+  style: string,
+  orientation: string,
+  segments: SubtitleSegment[]
+): Promise<{ job_id: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/api/subtitles/render/${jobId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ style, orientation, segments }),
     });
   } catch (err) {
     throw friendlyError(err);
