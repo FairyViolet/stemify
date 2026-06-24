@@ -6,12 +6,15 @@ export type SubtitleStyle = "pop" | "clean" | "classic";
 
 export type SubtitleOrientation = "auto" | "horizontal" | "vertical";
 
+export type SubtitleAnimation = "pop" | "shake" | "flash" | "none";
+
 export interface SubtitleWord {
   word: string;
   start: number;
   end: number;
-  color?: string;          // hex "#RRGGBB" manual override
-  sizeMultiplier?: number; // e.g. 1.5 = 150% size, manual override
+  color?: string;               // hex "#RRGGBB" manual override
+  sizeMultiplier?: number;      // e.g. 1.5 = 150% size, manual override
+  animation?: SubtitleAnimation; // manual override of the active-word animation
 }
 
 export interface SubtitleSegment {

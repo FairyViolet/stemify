@@ -160,16 +160,36 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
+def build_word_emphasis_tag(color, scale_pct: int, animation: str) -> str:
+    """Build the ASS override-block content (no braces) for an emphasized word."""
+    color_tag = f"\\c{color}&" if color else ""
+    scale_tag = f"\\fscx{scale_pct}\\fscy{scale_pct}"
+
+    if animation == "shake":
+        return (
+            f"{color_tag}{scale_tag}"
+            f"\\t(0,40,\\frz-6)\\t(40,90,\\frz6)\\t(90,140,\\frz-4)\\t(140,180,\\frz0)"
+        )
+    if animation == "flash":
+        return f"{color_tag}{scale_tag}\\alpha&H90&\\t(0,120,\\alpha&H00&)"
+    if animation == "none":
+        return f"{color_tag}{scale_tag}" if scale_pct != 100 else color_tag
+    # "pop" (default bounce)
+    return f"{color_tag}\\t(0,80,\\fscx{scale_pct}\\fscy{scale_pct})\\t(80,180,\\fscx100\\fscy100)"
+
+
 def build_ass_events_word_level(segments, style: dict) -> str:
     """
     One Dialogue line per word: full phrase text, active word highlighted.
-    A word dict may carry manual overrides — "color" (hex "#RRGGBB") and/or
-    "sizeMultiplier" (float, e.g. 1.5) — set by the user in the emphasis
-    editor. These take priority over the style's default highlight/scale.
+    A word dict may carry manual overrides set by the user in the emphasis
+    editor — "color" (hex "#RRGGBB"), "sizeMultiplier" (float, e.g. 1.5),
+    and/or "animation" ("pop"|"shake"|"flash"|"none"). These take priority
+    over the style's default highlight/scale for that word's spoken window.
     """
     lines = []
     default_highlight = style["highlight"]
     default_scale = 118 if style["pop_scale"] else 100
+    default_animation = "pop" if style["pop_scale"] else "none"
 
     for seg in segments:
         words = seg.get("words", [])
@@ -187,22 +207,19 @@ def build_ass_events_word_level(segments, style: dict) -> str:
 
                 override_color = hex_to_ass_bgr(w2.get("color"))
                 override_scale = w2.get("sizeMultiplier")
+                override_animation = w2.get("animation")
+
                 color = override_color or default_highlight
                 scale_pct = round(override_scale * 100) if override_scale else default_scale
-                animated = style["pop_scale"] or bool(override_scale)
+                animation = override_animation or default_animation
 
-                if not color and scale_pct == 100:
+                has_emphasis = bool(color) or scale_pct != 100 or animation != "none"
+
+                if not has_emphasis:
                     parts.append(word_text)
-                elif animated:
-                    color_tag = f"\\c{color}&" if color else ""
-                    parts.append(
-                        f"{{{color_tag}\\t(0,80,\\fscx{scale_pct}\\fscy{scale_pct})"
-                        f"\\t(80,180,\\fscx100\\fscy100)}}{word_text}{{\\r}}"
-                    )
-                elif color:
-                    parts.append(f"{{\\c{color}&}}{word_text}{{\\r}}")
                 else:
-                    parts.append(word_text)
+                    tag = build_word_emphasis_tag(color, scale_pct, animation)
+                    parts.append(f"{{{tag}}}{word_text}{{\\r}}")
             text = " ".join(parts)
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 

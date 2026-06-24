@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, Sparkles } from "lucide-react";
-import type { SubtitleSegment } from "@/types";
+import { X, Sparkles, Pencil } from "lucide-react";
+import type { SubtitleSegment, SubtitleAnimation } from "@/types";
 import { clsx } from "@/lib/utils";
 
 interface Props {
@@ -26,20 +26,34 @@ const SIZE_OPTIONS: { label: string; value: number }[] = [
   { label: "Enorme", value: 1.7 },
 ];
 
+const ANIMATION_OPTIONS: { label: string; value: SubtitleAnimation }[] = [
+  { label: "Rebote", value: "pop" },
+  { label: "Sacudida", value: "shake" },
+  { label: "Destello", value: "flash" },
+  { label: "Ninguna", value: "none" },
+];
+
 interface WordKey {
   segIdx: number;
   wordIdx: number;
 }
 
+type WordPatch = Partial<{
+  word: string;
+  color?: string;
+  sizeMultiplier?: number;
+  animation?: SubtitleAnimation;
+}>;
+
 export function WordEmphasisEditor({ segments, onChange }: Props) {
   const [active, setActive] = useState<WordKey | null>(null);
 
   const emphasizedCount = segments.reduce(
-    (n, seg) => n + seg.words.filter((w) => w.color || w.sizeMultiplier).length,
+    (n, seg) => n + seg.words.filter((w) => w.color || w.sizeMultiplier || (w.animation && w.animation !== "pop")).length,
     0
   );
 
-  function updateWord(segIdx: number, wordIdx: number, patch: Partial<{ color?: string; sizeMultiplier?: number }>) {
+  function updateWord(segIdx: number, wordIdx: number, patch: WordPatch) {
     const next = segments.map((seg, si) => {
       if (si !== segIdx) return seg;
       return {
@@ -51,14 +65,14 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
   }
 
   function clearWord(segIdx: number, wordIdx: number) {
-    updateWord(segIdx, wordIdx, { color: undefined, sizeMultiplier: undefined });
+    updateWord(segIdx, wordIdx, { color: undefined, sizeMultiplier: undefined, animation: undefined });
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-          Step 5 — Destacá palabras clave
+          Step 5 — Destacá y corregí palabras
         </p>
         {emphasizedCount > 0 && (
           <span className="flex items-center gap-1 text-[10px] text-amber-300/70 font-medium">
@@ -69,7 +83,7 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
       </div>
 
       <p className="text-white/30 text-xs">
-        Tocá cualquier palabra para darle un color y tamaño distinto en el momento exacto en que se dice.
+        Tocá cualquier palabra para corregir el texto, darle color, tamaño o animación distinta.
       </p>
 
       <div className="rounded-2xl border border-white/10 p-4 max-h-80 overflow-y-auto"
@@ -78,7 +92,7 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
           <p key={si} className="leading-loose mb-1">
             {seg.words.map((w, wi) => {
               const isOpen = active?.segIdx === si && active?.wordIdx === wi;
-              const hasOverride = !!(w.color || w.sizeMultiplier);
+              const hasOverride = !!(w.color || w.sizeMultiplier || (w.animation && w.animation !== "pop"));
               return (
                 <span key={wi} className="relative inline-block">
                   <button
@@ -103,15 +117,25 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
 
                   {isOpen && (
                     <div
-                      className="absolute z-30 top-full left-0 mt-2 w-60 rounded-xl border border-amber-500/30 p-3 shadow-2xl"
+                      className="absolute z-30 top-full left-0 mt-2 w-64 rounded-xl border border-amber-500/30 p-3 shadow-2xl"
                       style={{ background: "#15131f" }}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-white text-xs font-semibold truncate">&ldquo;{w.word.trim()}&rdquo;</span>
+                        <span className="flex items-center gap-1 text-white/40 text-[10px]">
+                          <Pencil className="w-3 h-3" /> Texto
+                        </span>
                         <button onClick={() => setActive(null)} className="text-white/30 hover:text-white/70">
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
+                      <input
+                        type="text"
+                        value={w.word}
+                        onChange={(e) => updateWord(si, wi, { word: e.target.value })}
+                        className="w-full mb-3 px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/15
+                          text-white text-sm focus:outline-none focus:border-amber-500/50"
+                        placeholder="Corregí la palabra…"
+                      />
 
                       <p className="text-[10px] text-white/40 mb-1.5">Color</p>
                       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -143,6 +167,24 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
                             )}
                           >
                             {s.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <p className="text-[10px] text-white/40 mb-1.5">Animación</p>
+                      <div className="grid grid-cols-2 gap-1.5 mb-3">
+                        {ANIMATION_OPTIONS.map((a) => (
+                          <button
+                            key={a.value}
+                            onClick={() => updateWord(si, wi, { animation: a.value })}
+                            className={clsx(
+                              "text-[10px] py-1.5 rounded-lg border font-medium transition-colors",
+                              (w.animation ?? "pop") === a.value
+                                ? "border-amber-500 bg-amber-500/20 text-white"
+                                : "border-white/15 text-white/50 hover:border-white/30"
+                            )}
+                          >
+                            {a.label}
                           </button>
                         ))}
                       </div>
