@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: Calibri, Arial, sans-serif; margin: 2.5cm; color: #1a1a1a; line-height: 1.6; }
+  h1.title { font-size: 38pt; font-weight: 900; color: #2d1b69; text-align: center; margin-bottom: 4px; letter-spacing: 4px; }
+  p.subtitle { font-size: 13pt; color: #6b46c1; text-align: center; margin-top: 0; margin-bottom: 30px; font-style: italic; }
+  hr { border: none; border-top: 2px solid #6b46c1; margin: 20px 0; }
+  h2 { font-size: 16pt; color: #2d1b69; margin-top: 28px; margin-bottom: 6px; border-left: 4px solid #6b46c1; padding-left: 10px; }
+  h3 { font-size: 13pt; color: #4c1d95; margin-top: 20px; margin-bottom: 4px; }
+  p { font-size: 11pt; margin: 6px 0 10px 0; }
+  ul { margin: 4px 0 12px 0; padding-left: 22px; }
+  li { font-size: 11pt; margin-bottom: 5px; }
+  .badge { display: inline-block; background: #ede9fe; color: #4c1d95; border-radius: 4px; padding: 1px 8px; font-size: 9.5pt; font-weight: bold; margin-left: 6px; }
+  .footer { text-align: center; color: #888; font-size: 9.5pt; font-style: italic; margin-top: 40px; border-top: 1px solid #ddd; padding-top: 12px; }
+  .highlight-box { background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 6px; padding: 12px 16px; margin: 14px 0; }
+  .highlight-box p { margin: 0; }
+</style>
+</head>
+<body>
+
+<h1 class="title">STEMIFY</h1>
+<p class="subtitle">La Suite de Inteligencia Artificial para Producción de Audio y Video</p>
+<hr>
+
+<h2>¿Qué es Stemify?</h2>
+<p>Stemify es una aplicación de escritorio de <strong>código abierto</strong> que integra múltiples herramientas de inteligencia artificial para el procesamiento profesional de audio y video. Diseñada para creadores de contenido, músicos, podcasters, editores de video y cualquier persona que trabaje con medios digitales, Stemify permite realizar tareas que antes requerían software costoso o conocimientos técnicos avanzados, todo desde una interfaz visual moderna e intuitiva.</p>
+
+<div class="highlight-box">
+<p>✅ <strong>Funciona 100% local</strong> — ningún archivo sale de tu computadora &nbsp;|&nbsp; ✅ <strong>Sin suscripciones ni pagos</strong> — completamente gratuito &nbsp;|&nbsp; ✅ <strong>Open Source</strong></p>
+</div>
+
+<hr>
+
+<h2>Módulos y Funcionalidades</h2>
+
+<h3>🎵 1. Music Mode — Separación de Stems con IA</h3>
+<p>Utiliza el modelo <strong>htdemucs</strong> de Meta AI (Demucs 4.0) para separar automáticamente los componentes de cualquier canción con precisión de estudio profesional.</p>
+<ul>
+  <li><strong>Modo 2 stems:</strong> separa la voz del resto de los instrumentos (backing track)</li>
+  <li><strong>Modo 4 stems:</strong> separa voz, batería, bajo y otros instrumentos de forma independiente</li>
+  <li>Salida en formato WAV sin pérdida de calidad</li>
+  <li>Aceleración por GPU (NVIDIA CUDA) para procesamiento ultrarrápido</li>
+  <li><em>Ideal para:</em> karaoke, remixes, práctica de instrumentos, análisis musical, sampling</li>
+</ul>
+
+<h3>🎬 2. Video Mode — Procesamiento de Audio en Video</h3>
+<p>Herramienta de edición de audio integrada en video usando <strong>FFmpeg</strong>, el estándar de la industria.</p>
+<ul>
+  <li>Extracción del audio completo de cualquier video (MP4, MOV, AVI, MKV, WebM y más)</li>
+  <li>Silenciamiento de la pista de audio manteniendo el video intacto</li>
+  <li>Separación de voz y música dentro de un video con IA</li>
+  <li>Compatible con prácticamente cualquier formato de video existente</li>
+  <li><em>Ideal para:</em> dubbing, eliminación de música de fondo, extracción de diálogos</li>
+</ul>
+
+<h3>🎙️ 3. Speech to Text — Transcripción con IA</h3>
+<p>Motor de transcripción basado en <strong>Whisper de OpenAI</strong>, uno de los mejores modelos de reconocimiento de voz disponibles a nivel mundial.</p>
+<ul>
+  <li>Detección automática del idioma hablado (100+ idiomas)</li>
+  <li>Transcripción con marcas de tiempo precisas por segmento</li>
+  <li>Exportación en formato SRT (subtítulos estándar) y TXT (texto plano)</li>
+  <li>Soporte para audio y video como entrada</li>
+  <li>Aceleración GPU para transcripción en segundos</li>
+  <li><em>Ideal para:</em> subtítulos, notas de reuniones, transcripción de podcasts, accesibilidad</li>
+</ul>
+
+<h3>✨ 4. Subtítulos Dinámicos — Karaoke con IA</h3>
+<p>La herramienta más avanzada de Stemify: genera <strong>subtítulos animados palabra por palabra</strong> y los quema directamente en el video, al estilo de los reels virales de TikTok, Instagram y YouTube Shorts.</p>
+<ul>
+  <li>Transcripción automática con timestamps por palabra usando Whisper</li>
+  <li><strong>Editor visual de palabras:</strong> seleccioná cada palabra para personalizar color, tamaño y animación individualmente</li>
+  <li><strong>Corrección de texto:</strong> editá palabras mal reconocidas o agregá tildes antes de renderizar</li>
+  <li><strong>4 animaciones por palabra:</strong> Rebote (pop), Sacudida (shake), Destello (flash), Sin animación</li>
+  <li>7 colores de énfasis + 3 tamaños (Normal, Grande, Enorme)</li>
+  <li>Modo <strong>horizontal</strong> (landscape) y <strong>vertical</strong> (portrait/TikTok) con márgenes adaptados automáticamente</li>
+  <li>3 estilos de subtítulo: Pop (llamativo), Clean (moderno), Classic (clásico)</li>
+  <li>Flujo inteligente en dos pasos: transcribir → editar → renderizar (sin re-procesar el audio)</li>
+  <li>Soporte para videos en cualquier resolución: 16:9, 9:16, 1:1, etc.</li>
+  <li><em>Ideal para:</em> reels virales, contenido educativo, videos de música, shorts de YouTube</li>
+</ul>
+
+<hr>
+
+<h2>Tecnologías Open Source que Integra</h2>
+<p>Stemify orquesta las mejores herramientas de código abierto del mundo en una sola interfaz accesible:</p>
+
+<h3>🤖 Inteligencia Artificial</h3>
+<ul>
+  <li><strong>Demucs 4.0</strong> (Meta AI / Facebook Research) — separación de fuentes de audio de nivel profesional, el mismo modelo usado en estudios de producción musicales</li>
+  <li><strong>OpenAI Whisper</strong> — reconocimiento de voz multiidioma de última generación, open source desde 2022, considerado el mejor STT gratuito disponible</li>
+  <li><strong>PyTorch</strong> (Meta AI) — framework de deep learning que ejecuta los modelos de IA con aceleración CUDA en GPU NVIDIA</li>
+</ul>
+
+<h3>🎞️ Procesamiento de Audio y Video</h3>
+<ul>
+  <li><strong>FFmpeg</strong> — el procesador de video/audio más usado del mundo (YouTube, VLC, Chrome y miles de apps lo usan internamente)</li>
+  <li><strong>libass</strong> — renderizador de subtítulos ASS/SSA de alta calidad, estándar en reproductores como VLC y mpv</li>
+  <li><strong>soundfile / libsndfile</strong> — lectura y escritura de audio de alta fidelidad sin pérdida</li>
+</ul>
+
+<h3>⚙️ Backend y Servidor</h3>
+<ul>
+  <li><strong>Node.js</strong> — entorno de ejecución JavaScript del lado del servidor (V8 engine)</li>
+  <li><strong>Express.js</strong> — framework web minimalista y rápido para la API REST</li>
+  <li><strong>Python 3</strong> — lenguaje principal para la ejecución de los modelos de IA</li>
+  <li><strong>fluent-ffmpeg</strong> — integración robusta de FFmpeg dentro de Node.js</li>
+</ul>
+
+<h3>🖥️ Frontend e Interfaz</h3>
+<ul>
+  <li><strong>Next.js 15</strong> (React) — framework de interfaz web moderno con renderizado optimizado</li>
+  <li><strong>Tailwind CSS</strong> — diseño visual moderno, oscuro y responsivo</li>
+  <li><strong>TypeScript</strong> — tipado estático para código más robusto y mantenible</li>
+  <li><strong>Lucide React</strong> — iconografía limpia y profesional</li>
+</ul>
+
+<hr>
+
+<h2>Características Técnicas Destacadas</h2>
+<ul>
+  <li>🔒 <strong>100% local:</strong> ningún archivo sale de tu computadora, privacidad garantizada</li>
+  <li>💰 <strong>Sin suscripción ni pagos:</strong> completamente gratuito y de código abierto</li>
+  <li>⚡ <strong>Aceleración GPU:</strong> compatible con NVIDIA CUDA para procesamiento rápido</li>
+  <li>🖥️ <strong>Multiplataforma:</strong> funciona en Windows (soporte Linux/Mac en desarrollo)</li>
+  <li>💾 <strong>Persistencia de trabajos:</strong> los resultados se conservan aunque reinicies el servidor</li>
+  <li>🚀 <strong>Auto-inicio:</strong> se puede configurar para arrancar automáticamente con Windows</li>
+  <li>🌐 <strong>Interfaz web:</strong> accesible desde cualquier navegador en localhost:3000</li>
+  <li>🔌 <strong>API REST:</strong> arquitectura que permite integración con otras herramientas</li>
+</ul>
+
+<hr>
+
+<h2>¿Para Quién es Stemify?</h2>
+<ul>
+  <li>🎥 <strong>Creadores de contenido:</strong> subtítulos dinámicos para TikTok, Reels e Instagram en minutos</li>
+  <li>🎸 <strong>Músicos y productores:</strong> extraé stems de cualquier canción para remixes o covers</li>
+  <li>🎙️ <strong>Podcasters:</strong> transcripción automática de episodios completos</li>
+  <li>▶️ <strong>Youtubers:</strong> quemá subtítulos atractivos directamente en tus videos</li>
+  <li>📚 <strong>Educadores:</strong> generá materiales accesibles con subtítulos automáticos</li>
+  <li>📰 <strong>Periodistas:</strong> transcribí entrevistas y reportajes al instante</li>
+  <li>🎧 <strong>DJ y VJ:</strong> separación de instrumentos para remixes y práctica</li>
+  <li>👨‍💻 <strong>Desarrolladores:</strong> base extensible open source para construir herramientas de medios con IA</li>
+</ul>
+
+<hr>
+
+<h2>Cómo Iniciarlo</h2>
+<p>Stemify está diseñado para ser simple de usar una vez configurado:</p>
+<ul>
+  <li>Hacer doble clic en <strong>start.bat</strong> (o se inicia solo si está configurado el auto-inicio de Windows)</li>
+  <li>Abrir el navegador en <strong>http://localhost:3000</strong></li>
+  <li>Seleccionar el módulo deseado, subir el archivo y procesar</li>
+</ul>
+<p>No requiere conocimientos técnicos para el uso cotidiano.</p>
+
+<div class="footer">
+Stemify — Herramienta open source de producción de audio y video con Inteligencia Artificial &nbsp;|&nbsp; Uso local &nbsp;|&nbsp; Gratuito &nbsp;|&nbsp; Código abierto
+</div>
+
+</body>
+</html>
