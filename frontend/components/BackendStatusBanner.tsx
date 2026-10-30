@@ -11,9 +11,13 @@ export function BackendStatusBanner() {
   // ── All good ──────────────────────────────────────────────
   if (backend.state === "ok") {
     return (
-      <div className="flex items-center gap-2 text-xs text-emerald-400/60 justify-center">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-400/60 justify-center text-center">
         <CheckCircle2 className="w-3.5 h-3.5" />
         Backend conectado · FFmpeg ✓ · Demucs ✓
+        {backend.roformer && <> · RoFormer ✓</>}
+        <span className={backend.gpu ? "text-emerald-300/80" : "text-amber-300/70"}>
+          · {backend.gpu ? `GPU ${backend.gpu} ⚡` : "CPU (sin GPU)"}
+        </span>
       </div>
     );
   }
@@ -31,7 +35,7 @@ export function BackendStatusBanner() {
           <div className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5">
             <Terminal className="w-3 h-3 text-white/30 flex-shrink-0" />
             <code className="text-[10px] text-emerald-300/80 font-mono select-all">
-              cd C:\stemify\backend &amp;&amp; node server.js
+              Abre start.bat en la carpeta de Stemify
             </code>
           </div>
         </div>

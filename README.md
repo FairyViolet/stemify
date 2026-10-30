@@ -17,21 +17,27 @@ Haz doble clic en **`start.bat`** y abre http://localhost:3000
 |-------------|----------|---------------|
 | **Node.js 18+** | Ejecutar backend y frontend | https://nodejs.org |
 | **Python 3.10+** | Separación por IA con Demucs | https://python.org (marcar "Add to PATH") |
-| **Demucs** | Motor de IA | `pip install demucs` |
+| **Demucs + RoFormer** | Motores de IA | `instalar_ia.bat` (ver abajo) |
 
 > FFmpeg viene incluido automáticamente — no necesitas instalarlo.
 
-### Instalar dependencias
+### Instalar los motores de IA (y activar la GPU)
+
+Doble clic en **`instalar_ia.bat`**. Crea/usa la carpeta `venv` e instala:
+
+- **PyTorch con CUDA** si tienes una tarjeta **NVIDIA** (la IA corre en la GPU, mucho más rápido). Si no, la versión para CPU.
+- **Demucs** y **audio-separator** (BS-RoFormer, el motor de Ultimate Vocal Remover).
+
+Al arrancar, la ventana del backend muestra `Aceleración: GPU <tu tarjeta>` o `CPU`.
+La primera separación con RoFormer descarga el modelo (~640 MB) en la carpeta `models/`.
+
+### Instalar dependencias de Node
+
+`start.bat` ejecuta `npm install` solo si falta `node_modules`. Para hacerlo a mano:
 
 ```bat
-:: Backend
-cd C:\stemify\backend
-npm install
-
-:: Frontend
-cd "S:\Claude code\stemify\frontend"
-npm install
-npm run build
+cd backend-node && npm install
+cd ..\frontend && npm install
 ```
 
 ### Primer inicio
@@ -59,6 +65,12 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
 ### Music Mode (MP3, WAV, M4A, AAC, FLAC, OGG)
 - **2 pistas**: Vocals + Instrumental
 - **4 pistas**: Vocals + Drums + Bass + Other Instruments
+- **Motor / calidad**:
+  - **RoFormer** — la voz más limpia (BS-RoFormer). En 4 pistas, Demucs divide el instrumental.
+  - **Demucs Máxima precisión** — `htdemucs_ft` con doble pasada.
+  - **Demucs Estándar** — `htdemucs`, una pasada, el más rápido.
+- Las pistas salen en WAV de 32 bits con **el mismo volumen que el original**
+  (sin normalizar ni recortar): sumadas, reconstruyen la canción exacta.
 
 ### Video Mode (MP4, MOV, MKV, WEBM, AVI)
 - **Extraer audio completo** → WAV

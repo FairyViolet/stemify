@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
-const { checkDemucs, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
+const { checkDemucs, getAiInfo, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
 const { runBurnSubtitles, runTranscribeOnly, runRenderOnly } = require("./subtitles");
 
@@ -84,9 +84,12 @@ router.param("jobId", validateJobIdParam);
 // GET /api/status
 // ──────────────────────────────────────────────
 router.get("/status", (req, res) => {
+  const ai = getAiInfo();
   res.json({
     ffmpeg: true,           // always true — ffmpeg-static is bundled
     demucs: checkDemucs(),
+    roformer: ai.roformer,  // audio-separator installed
+    gpu: ai.gpu,            // e.g. "NVIDIA GeForce RTX 4060", or null = CPU
   });
 });
 
@@ -107,7 +110,7 @@ router.post("/process/music", attachJobId, upload.single("file"), async (req, re
   }
 
   const quality = parseQuality(req.body.quality);
-  if (!quality) return res.status(400).json({ detail: "La calidad debe ser 'standard' o 'high'." });
+  if (!quality) return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
 
   const jobId = req.__jobId;
   createJob(jobId, { stage: "Preparing file", progress: 10 });
@@ -142,7 +145,7 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
   };
 
   if (!options.quality) {
-    return res.status(400).json({ detail: "La calidad debe ser 'standard' o 'high'." });
+    return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
   }
 
   if (![options.extract_full_audio, options.remove_audio_track, options.separate_voice_music, options.separate_music_stems].some(Boolean)) {

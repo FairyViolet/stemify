@@ -30,7 +30,8 @@ export default function HomePage() {
   const [appMode, setAppMode] = useState<AppMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [musicMode, setMusicMode] = useState<MusicMode>("2stem");
-  const [musicQuality, setMusicQuality] = useState<SeparationQuality>("high");
+  // null = not chosen yet: use the best engine the backend has installed
+  const [musicQuality, setMusicQuality] = useState<SeparationQuality | null>(null);
   const [videoOptions, setVideoOptions] = useState<VideoOptions>(DEFAULT_VIDEO_OPTIONS);
   const [uiState, setUiState] = useState<UIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
@@ -78,6 +79,8 @@ export default function HomePage() {
   const backendReachable = backendStatus.state !== "unreachable" && backendStatus.state !== "checking";
   const ffmpegOk = backendStatus.state === "ok" || (backendStatus.state === "partial" && backendStatus.ffmpeg);
   const demucsOk  = backendStatus.state === "ok" || (backendStatus.state === "partial" && backendStatus.demucs);
+  const roformerOk = (backendStatus.state === "ok" || backendStatus.state === "partial") && backendStatus.roformer;
+  const effectiveQuality: SeparationQuality = musicQuality ?? (roformerOk ? "roformer" : "high");
 
   // Does the current selection need Demucs?
   const needsDemucs =
@@ -102,7 +105,7 @@ export default function HomePage() {
     try {
       let result: { job_id: string };
       if (appMode === "music") {
-        result = await submitMusicJob(file, musicMode, musicQuality);
+        result = await submitMusicJob(file, musicMode, effectiveQuality);
       } else {
         result = await submitVideoJob(file, videoOptions);
       }
@@ -183,7 +186,7 @@ export default function HomePage() {
           <div className="inline-flex items-center gap-2 text-[11px] font-medium text-violet-300/70
             border border-violet-500/20 bg-violet-500/8 rounded-full px-3 py-1">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-            Powered by Demucs · FFmpeg
+            Powered by Demucs · RoFormer · FFmpeg
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight">
@@ -231,8 +234,9 @@ export default function HomePage() {
                   <MusicSeparationOptions
                     selected={musicMode}
                     onChange={setMusicMode}
-                    quality={musicQuality}
+                    quality={effectiveQuality}
                     onQualityChange={setMusicQuality}
+                    roformerAvailable={roformerOk}
                   />
                 ) : (
                   <VideoSeparationOptions options={videoOptions} onChange={setVideoOptions} />
@@ -321,7 +325,7 @@ export default function HomePage() {
       </main>
 
       <footer className="relative border-t border-white/5 py-5 text-center text-white/15 text-[11px]">
-        Stemify · Separación de pistas con IA · Demucs + FFmpeg
+        Stemify · Separación de pistas con IA · Demucs + RoFormer + FFmpeg
       </footer>
     </div>
   );

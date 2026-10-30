@@ -31,9 +31,9 @@ async function processMusicJob(jobId, uploadPath, mode, outputDir, quality) {
     updateJob(jobId, { stage: "Running AI separation", progress: 20 });
 
     const baseName = path.basename(uploadPath, path.extname(uploadPath));
-    const stemFiles = await runDemucs(uploadPath, outputDir, mode, (pct) => {
+    const stemFiles = await runDemucs(uploadPath, outputDir, mode, (pct, stage) => {
       // Map demucs 0-100 to our 20-85 range
-      updateJob(jobId, { progress: Math.round(20 + pct * 0.65) });
+      updateJob(jobId, { progress: Math.round(20 + pct * 0.65), ...(stage && { stage }) });
     }, quality);
 
     if (!stemFiles.length) throw new Error("Demucs no generó archivos de salida.");
@@ -113,8 +113,8 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
 
     if (separate_voice_music && extractedAudio) {
       updateJob(jobId, { stage: "Separating voices and music", progress: 45 });
-      const stemFiles = await runDemucs(extractedAudio, outputDir, "2stem", (pct) => {
-        updateJob(jobId, { progress: Math.round(45 + pct * 0.3) });
+      const stemFiles = await runDemucs(extractedAudio, outputDir, "2stem", (pct, stage) => {
+        updateJob(jobId, { progress: Math.round(45 + pct * 0.3), ...(stage && { stage }) });
       }, quality);
       for (const src of stemFiles) {
         const suffix = extractStemSuffix(src, path.basename(extractedAudio, ".wav"));
@@ -129,8 +129,8 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
 
     if (separate_music_stems && extractedAudio) {
       updateJob(jobId, { stage: "Running 4-stem AI separation", progress: 60 });
-      const stemFiles = await runDemucs(extractedAudio, outputDir, "4stem", (pct) => {
-        updateJob(jobId, { progress: Math.round(60 + pct * 0.28) });
+      const stemFiles = await runDemucs(extractedAudio, outputDir, "4stem", (pct, stage) => {
+        updateJob(jobId, { progress: Math.round(60 + pct * 0.28), ...(stage && { stage }) });
       }, quality);
       for (const src of stemFiles) {
         const suffix = extractStemSuffix(src, path.basename(extractedAudio, ".wav"));

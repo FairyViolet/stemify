@@ -44,5 +44,11 @@ app.listen(PORT, () => {
   const { checkDemucs } = require("./src/demucs");
   const demucs = checkDemucs();
   console.log(`   Demucs: ${demucs ? "disponible ✓" : "no disponible (instala Python + pip install demucs)"}`);
+  if (demucs) {
+    const { getAiInfo } = require("./src/demucs");
+    const ai = getAiInfo();
+    console.log(`   RoFormer: ${ai.roformer ? "disponible ✓" : "no instalado (ejecuta instalar_ia.bat)"}`);
+    console.log(`   Aceleración: ${ai.gpu ? `GPU ${ai.gpu} ✓` : "CPU (sin GPU NVIDIA detectada)"}${ai.torch ? ` · PyTorch ${ai.torch}` : ""}`);
+  }
   console.log();
 });

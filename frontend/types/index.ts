@@ -1,7 +1,7 @@
 export type AppMode = "music" | "video" | "speech" | "subtitles";
 
 export type MusicMode = "2stem" | "4stem";
-export type SeparationQuality = "standard" | "high";
+export type SeparationQuality = "roformer" | "high" | "standard";
 
 export type SubtitleStyle = "pop" | "clean" | "classic";
 
@@ -53,4 +53,6 @@ export interface VideoOptions {
 export interface BackendStatus {
   ffmpeg: boolean;
   demucs: boolean;
+  roformer?: boolean;    // BS-RoFormer (audio-separator) installed
+  gpu?: string | null;   // GPU name used for AI, null = CPU only
 }

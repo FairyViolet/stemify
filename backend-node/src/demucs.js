@@ -14,15 +14,23 @@ const STEM_LABELS = [
 ];
 
 // Separation quality presets.
-// - standard: the original htdemucs model, one pass (fastest).
+// - roformer: BS-RoFormer (the model behind Ultimate Vocal Remover) for the
+//   vocals — about +2.4 dB cleaner than htdemucs_ft on audio-separator's
+//   benchmark. In 4-stem mode Demucs then splits the instrumental.
+//   Needs `audio-separator` (instalar_ia.bat). Weights (~640 MB) download
+//   on first use into models/.
 // - high: htdemucs_ft — 4 models each fine-tuned on one source — run twice
-//   with random time shifts and averaged. Cleaner vocals and less bleed,
-//   ~8x slower than standard. Weights (~320 MB) download on first use.
+//   with random time shifts and averaged. ~8x slower than standard.
+//   Weights (~320 MB) download on first use.
+// - standard: the original htdemucs model, one pass (fastest).
 const QUALITY_PRESETS = {
-  standard: { model: "htdemucs",    shifts: 1 },
-  high:     { model: "htdemucs_ft", shifts: 2 },
+  roformer: { engine: "roformer", model: "htdemucs_ft", shifts: 1 },
+  high:     { engine: "demucs",   model: "htdemucs_ft", shifts: 2 },
+  standard: { engine: "demucs",   model: "htdemucs",    shifts: 1 },
 };
 const DEFAULT_QUALITY = "high";
+const ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt";
+const MODELS_DIR = path.resolve(__dirname, "..", "..", "models");
 
 // Known Python install paths on this machine (checked first for reliability)
 // IMPORTANT: venv paths come first — they have torch/demucs installed
@@ -96,6 +104,36 @@ function checkDemucs() {
   return findDemucsPython() !== null;
 }
 
+// Cache: what the AI Python env can do (RoFormer installed? GPU visible?)
+let _cachedAiInfo = undefined;
+
+/**
+ * @returns {{ roformer: boolean, gpu: string|null, torch: string|null }}
+ */
+function getAiInfo() {
+  if (_cachedAiInfo !== undefined) return _cachedAiInfo;
+  const fallback = { roformer: false, gpu: null, torch: null };
+  const python = findDemucsPython();
+  if (!python) return (_cachedAiInfo = fallback);
+
+  const isAbsolute = python.includes("\\") || python.includes("/");
+  // No double quotes inside: the whole snippet gets quoted for the shell.
+  const code =
+    "import json, importlib.util as u, torch; " +
+    "print(json.dumps({'roformer': u.find_spec('audio_separator') is not None and u.find_spec('onnxruntime') is not None, " +
+    "'gpu': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None, " +
+    "'torch': torch.__version__}))";
+  const r = spawnSync(python, shellArgs(["-c", code], !isAbsolute), {
+    encoding: "utf8", timeout: 30000, shell: !isAbsolute,
+  });
+  try {
+    _cachedAiInfo = { ...fallback, ...JSON.parse(r.stdout.trim().split("\n").pop()) };
+  } catch {
+    _cachedAiInfo = fallback;
+  }
+  return _cachedAiInfo;
+}
+
 const ffmpegPath = require("ffmpeg-static");
 
 const WORKER_SCRIPT = path.resolve(__dirname, "..", "..", "backend", "separation_worker.py");
@@ -123,6 +161,9 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
     WORKER_SCRIPT,
     "--input", audioPath,
     "--output_dir", outputDir,
+    "--engine", preset.engine,
+    "--roformer_model", ROFORMER_MODEL,
+    "--model_dir", MODELS_DIR,
     "--model", preset.model,
     "--shifts", String(preset.shifts),
     "--overlap", "0.25",
@@ -140,6 +181,8 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
         PYTHONIOENCODING: "utf-8",
         PYTORCH_ENABLE_MPS_FALLBACK: "1",
         STEMIFY_FFMPEG_PATH: ffmpegPath,
+        // audio-separator refuses to start unless `ffmpeg` is on PATH
+        PATH: `${path.dirname(ffmpegPath)}${path.delimiter}${process.env.PATH || ""}`,
       },
     });
 
@@ -159,7 +202,7 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
         try { msg = JSON.parse(trimmed); } catch { continue; }
         if (msg.error) workerError = msg.error;
         else if (msg.done) result = msg;
-        else if (typeof msg.progress === "number" && onProgress) onProgress(msg.progress);
+        else if (typeof msg.progress === "number" && onProgress) onProgress(msg.progress, msg.stage);
       }
     });
 
@@ -172,7 +215,7 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
       if (code !== 0 || !result) {
         return reject(new Error(`Demucs falló (código ${code}): ${stderr.slice(-1000)}`));
       }
-      console.log(`[demucs] done on ${result.device}: ${result.files.length} pistas`);
+      console.log(`[demucs] ${preset.engine} done on ${result.device}: ${result.files.length} pistas`);
       resolve(result.files);
     });
 
@@ -203,4 +246,4 @@ function extractStemSuffix(demucsFilename, trackBaseName) {
   return base;
 }
 
-module.exports = { QUALITY_PRESETS, DEFAULT_QUALITY, checkDemucs, runDemucs, stemLabel, extractStemSuffix };
+module.exports = { QUALITY_PRESETS, DEFAULT_QUALITY, checkDemucs, getAiInfo, runDemucs, stemLabel, extractStemSuffix };
