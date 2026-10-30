@@ -21,7 +21,7 @@ function safeDest(outputDir, srcPath, label) {
 /**
  * Music separation job runner
  */
-async function processMusicJob(jobId, uploadPath, mode, outputDir) {
+async function processMusicJob(jobId, uploadPath, mode, outputDir, quality) {
   try {
     updateJob(jobId, { status: "processing", stage: "Validating audio", progress: 5 });
 
@@ -34,7 +34,7 @@ async function processMusicJob(jobId, uploadPath, mode, outputDir) {
     const stemFiles = await runDemucs(uploadPath, outputDir, mode, (pct) => {
       // Map demucs 0-100 to our 20-85 range
       updateJob(jobId, { progress: Math.round(20 + pct * 0.65) });
-    });
+    }, quality);
 
     if (!stemFiles.length) throw new Error("Demucs no generó archivos de salida.");
 
@@ -68,6 +68,7 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
     remove_audio_track,
     separate_voice_music,
     separate_music_stems,
+    quality,
   } = options;
 
   try {
@@ -114,7 +115,7 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
       updateJob(jobId, { stage: "Separating voices and music", progress: 45 });
       const stemFiles = await runDemucs(extractedAudio, outputDir, "2stem", (pct) => {
         updateJob(jobId, { progress: Math.round(45 + pct * 0.3) });
-      });
+      }, quality);
       for (const src of stemFiles) {
         const suffix = extractStemSuffix(src, path.basename(extractedAudio, ".wav"));
         const destName = `${baseName}_${suffix}.wav`;
@@ -130,7 +131,7 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
       updateJob(jobId, { stage: "Running 4-stem AI separation", progress: 60 });
       const stemFiles = await runDemucs(extractedAudio, outputDir, "4stem", (pct) => {
         updateJob(jobId, { progress: Math.round(60 + pct * 0.28) });
-      });
+      }, quality);
       for (const src of stemFiles) {
         const suffix = extractStemSuffix(src, path.basename(extractedAudio, ".wav"));
         const destName = `${baseName}_${suffix}.wav`;

@@ -1,6 +1,7 @@
 export type AppMode = "music" | "video" | "speech" | "subtitles";
 
 export type MusicMode = "2stem" | "4stem";
+export type SeparationQuality = "standard" | "high";
 
 export type SubtitleStyle = "pop" | "clean" | "classic";
 

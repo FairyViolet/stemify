@@ -15,7 +15,7 @@ import { submitMusicJob, submitVideoJob, fetchJob, deleteJob } from "@/lib/api";
 import { useBackendStatus } from "@/lib/useBackendStatus";
 import { SpeechToText } from "@/components/SpeechToText";
 import { DynamicSubtitles } from "@/components/DynamicSubtitles";
-import type { AppMode, MusicMode, Job, VideoOptions } from "@/types";
+import type { AppMode, MusicMode, SeparationQuality, Job, VideoOptions } from "@/types";
 
 const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
   extract_full_audio: true,
@@ -30,6 +30,7 @@ export default function HomePage() {
   const [appMode, setAppMode] = useState<AppMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [musicMode, setMusicMode] = useState<MusicMode>("2stem");
+  const [musicQuality, setMusicQuality] = useState<SeparationQuality>("high");
   const [videoOptions, setVideoOptions] = useState<VideoOptions>(DEFAULT_VIDEO_OPTIONS);
   const [uiState, setUiState] = useState<UIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
@@ -101,7 +102,7 @@ export default function HomePage() {
     try {
       let result: { job_id: string };
       if (appMode === "music") {
-        result = await submitMusicJob(file, musicMode);
+        result = await submitMusicJob(file, musicMode, musicQuality);
       } else {
         result = await submitVideoJob(file, videoOptions);
       }
@@ -227,7 +228,12 @@ export default function HomePage() {
             {file && (
               <>
                 {appMode === "music" ? (
-                  <MusicSeparationOptions selected={musicMode} onChange={setMusicMode} />
+                  <MusicSeparationOptions
+                    selected={musicMode}
+                    onChange={setMusicMode}
+                    quality={musicQuality}
+                    onQualityChange={setMusicQuality}
+                  />
                 ) : (
                   <VideoSeparationOptions options={videoOptions} onChange={setVideoOptions} />
                 )}

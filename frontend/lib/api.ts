@@ -27,11 +27,13 @@ function friendlyError(err: unknown): Error {
 
 export async function submitMusicJob(
   file: File,
-  mode: string
+  mode: string,
+  quality: string = "high"
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("mode", mode);
+  form.append("quality", quality);
 
   let res: Response;
   try {

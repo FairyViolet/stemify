@@ -1,13 +1,28 @@
 "use client";
 
 import { Check } from "lucide-react";
-import type { MusicMode } from "@/types";
+import type { MusicMode, SeparationQuality } from "@/types";
 import { clsx } from "@/lib/utils";
 
 interface Props {
   selected: MusicMode;
   onChange: (mode: MusicMode) => void;
+  quality: SeparationQuality;
+  onQualityChange: (quality: SeparationQuality) => void;
 }
+
+const qualityOptions: { id: SeparationQuality; title: string; description: string }[] = [
+  {
+    id: "high",
+    title: "Máxima precisión",
+    description: "Modelo afinado + doble pasada. Voces más limpias, más lento.",
+  },
+  {
+    id: "standard",
+    title: "Estándar",
+    description: "Una sola pasada. Unas 8 veces más rápido.",
+  },
+];
 
 const STEM_COLORS: Record<string, string> = {
   "🎤 Vocals":       "bg-pink-500/20 text-pink-300 border-pink-500/30",
@@ -34,7 +49,7 @@ const options: { id: MusicMode; title: string; badge: string; description: strin
   },
 ];
 
-export function MusicSeparationOptions({ selected, onChange }: Props) {
+export function MusicSeparationOptions({ selected, onChange, quality, onQualityChange }: Props) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold mb-3">
@@ -90,6 +105,40 @@ export function MusicSeparationOptions({ selected, onChange }: Props) {
           );
         })}
       </div>
+
+      <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold mt-5 mb-3">
+        Calidad de separación
+      </p>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {qualityOptions.map((opt) => {
+          const active = quality === opt.id;
+          return (
+            <button
+              key={opt.id}
+              onClick={() => onQualityChange(opt.id)}
+              className={clsx(
+                "relative text-left rounded-xl border p-3 transition-all duration-200 cursor-pointer",
+                active
+                  ? "border-violet-500/60 bg-violet-500/10 ring-1 ring-violet-500/20"
+                  : "border-white/10 hover:border-violet-500/30 bg-white/3 hover:bg-violet-500/5"
+              )}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-white font-bold text-sm">{opt.title}</p>
+                {active && (
+                  <div className="w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
+                    <Check className="w-3 h-3 text-white" />
+                  </div>
+                )}
+              </div>
+              <p className="text-white/40 text-xs">{opt.description}</p>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-white/30 text-[11px] mt-2">
+        Las pistas se exportan en WAV de 32 bits: conservan el volumen exacto de la canción original.
+      </p>
     </div>
   );
 }

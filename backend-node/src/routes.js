@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
-const { checkDemucs } = require("./demucs");
+const { checkDemucs, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
 const { runBurnSubtitles, runTranscribeOnly, runRenderOnly } = require("./subtitles");
 
@@ -24,6 +24,11 @@ const ALLOWED_VIDEO = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
 // "python" is on PATH, and a space would split the file path in two.
 function safeName(name) {
   return path.basename(name).replace(/[^a-zA-Z0-9._\-]/g, "_") || "upload";
+}
+
+function parseQuality(value) {
+  const quality = value || DEFAULT_QUALITY;
+  return Object.hasOwn(QUALITY_PRESETS, quality) ? quality : null;
 }
 
 function getExt(name) {
@@ -101,13 +106,16 @@ router.post("/process/music", attachJobId, upload.single("file"), async (req, re
     return res.status(400).json({ detail: "El modo debe ser '2stem' o '4stem'." });
   }
 
+  const quality = parseQuality(req.body.quality);
+  if (!quality) return res.status(400).json({ detail: "La calidad debe ser 'standard' o 'high'." });
+
   const jobId = req.__jobId;
   createJob(jobId, { stage: "Preparing file", progress: 10 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  processMusicJob(jobId, req.file.path, mode, outputDir).catch(() => {});
+  processMusicJob(jobId, req.file.path, mode, outputDir, quality).catch(() => {});
 
   res.json({ job_id: jobId });
 });
@@ -130,9 +138,14 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
     remove_audio_track:   req.body.remove_audio_track   === "true",
     separate_voice_music: req.body.separate_voice_music === "true",
     separate_music_stems: req.body.separate_music_stems === "true",
+    quality: parseQuality(req.body.quality),
   };
 
-  if (!Object.values(options).some(Boolean)) {
+  if (!options.quality) {
+    return res.status(400).json({ detail: "La calidad debe ser 'standard' o 'high'." });
+  }
+
+  if (![options.extract_full_audio, options.remove_audio_track, options.separate_voice_music, options.separate_music_stems].some(Boolean)) {
     return res.status(400).json({ detail: "Selecciona al menos una opción de procesamiento." });
   }
 
