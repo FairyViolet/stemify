@@ -6,7 +6,8 @@ const { v4: uuidv4 } = require("uuid");
 
 const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
-const { processMusicJob, processVideoJob } = require("./processing");
+const { processMusicJob, processVideoJob, processConvertJob } = require("./processing");
+const { AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT } = require("./ffmpeg");
 const { checkDemucs, getAiInfo, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
 const { runBurnSubtitles, runTranscribeOnly, runRenderOnly } = require("./subtitles");
@@ -17,7 +18,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
 const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB || "500") * 1024 * 1024;
 
-const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
+const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
 const ALLOWED_VIDEO = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
 
 // Spaces are replaced too: Python workers are spawned through a shell when
@@ -30,6 +31,12 @@ function parseQuality(value) {
   const quality = value || DEFAULT_QUALITY;
   return Object.hasOwn(QUALITY_PRESETS, quality) ? quality : null;
 }
+
+function parseFormat(value) {
+  const format = value || DEFAULT_AUDIO_FORMAT;
+  return Object.hasOwn(AUDIO_FORMATS, format) ? format : null;
+}
+const BAD_FORMAT = `Formato no válido. Usa: ${Object.keys(AUDIO_FORMATS).join(", ")}.`;
 
 function getExt(name) {
   return path.extname(name).toLowerCase();
@@ -112,13 +119,16 @@ router.post("/process/music", attachJobId, upload.single("file"), async (req, re
   const quality = parseQuality(req.body.quality);
   if (!quality) return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
 
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
   const jobId = req.__jobId;
   createJob(jobId, { stage: "Preparing file", progress: 10 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  processMusicJob(jobId, req.file.path, mode, outputDir, quality).catch(() => {});
+  processMusicJob(jobId, req.file.path, mode, outputDir, quality, outputFormat).catch(() => {});
 
   res.json({ job_id: jobId });
 });
@@ -142,7 +152,12 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
     separate_voice_music: req.body.separate_voice_music === "true",
     separate_music_stems: req.body.separate_music_stems === "true",
     quality: parseQuality(req.body.quality),
+    output_format: parseFormat(req.body.output_format),
   };
+
+  if (!options.output_format) {
+    return res.status(400).json({ detail: BAD_FORMAT });
+  }
 
   if (!options.quality) {
     return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
@@ -159,6 +174,26 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
   fs.mkdirSync(outputDir, { recursive: true });
 
   processVideoJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/convert — audio converter (any audio/video → chosen format)
+// ──────────────────────────────────────────────
+router.post("/convert", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
+  const jobId = req.__jobId;
+  createJob(jobId, { stage: "En cola..." });
+
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  processConvertJob(jobId, req.file.path, outputFormat, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
 });

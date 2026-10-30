@@ -28,12 +28,14 @@ function friendlyError(err: unknown): Error {
 export async function submitMusicJob(
   file: File,
   mode: string,
-  quality: string = "high"
+  quality: string = "high",
+  outputFormat: string = "wav32"
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("mode", mode);
   form.append("quality", quality);
+  form.append("output_format", outputFormat);
 
   let res: Response;
   try {
@@ -55,10 +57,12 @@ export async function submitMusicJob(
 
 export async function submitVideoJob(
   file: File,
-  options: VideoOptions
+  options: VideoOptions,
+  outputFormat: string = "wav32"
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
+  form.append("output_format", outputFormat);
   form.append("extract_full_audio", String(options.extract_full_audio));
   form.append("remove_audio_track", String(options.remove_audio_track));
   form.append("separate_voice_music", String(options.separate_voice_music));
@@ -195,4 +199,26 @@ export async function deleteJob(jobId: string): Promise<void> {
 
 export function getDownloadUrl(jobId: string, filename: string): string {
   return `${BACKEND_URL}/api/download/${jobId}/${encodeURIComponent(filename)}`;
+}
+
+export async function submitConvertJob(
+  file: File,
+  outputFormat: string
+): Promise<{ job_id: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("output_format", outputFormat);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/api/convert`, { method: "POST", body: form });
+  } catch (err) {
+    throw friendlyError(err);
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? `Error del servidor (${res.status})`);
+  }
+  return res.json();
 }

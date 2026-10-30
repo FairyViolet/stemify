@@ -69,8 +69,14 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
   - **RoFormer** — la voz más limpia (BS-RoFormer). En 4 pistas, Demucs divide el instrumental.
   - **Demucs Máxima precisión** — `htdemucs_ft` con doble pasada.
   - **Demucs Estándar** — `htdemucs`, una pasada, el más rápido.
-- Las pistas salen en WAV de 32 bits con **el mismo volumen que el original**
-  (sin normalizar ni recortar): sumadas, reconstruyen la canción exacta.
+- **Formato de descarga**: WAV 32/24/16-bit, FLAC, MP3 320/192, M4A (AAC), OGG u Opus.
+  Siempre con **el mismo volumen que el original**. En WAV 32-bit es exacto:
+  sumadas, las pistas reconstruyen la canción. En los demás formatos, si algún
+  pico pasa del máximo se suaviza en vez de distorsionar.
+
+### Convertidor de Audio (cualquier audio o vídeo)
+- Convierte a WAV, FLAC, MP3, M4A, OGG u Opus. Si subes un vídeo, extrae y convierte su audio.
+- Conserva el volumen y los datos (título, artista); no copia la carátula.
 
 ### Video Mode (MP4, MOV, MKV, WEBM, AVI)
 - **Extraer audio completo** → WAV

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Upload, FileAudio, FileVideo, X, Music, Film, Mic, Captions } from "lucide-react";
+import { Upload, FileAudio, FileVideo, X, Music, Film, Mic, Captions, ArrowRightLeft } from "lucide-react";
 import type { AppMode } from "@/types";
 import { formatBytes, clsx } from "@/lib/utils";
 
@@ -11,10 +11,10 @@ interface Props {
   onFile: (file: File | null) => void;
 }
 
-const AUDIO_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg";
+const AUDIO_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.aiff,.aif";
 const VIDEO_ACCEPT = ".mp4,.mov,.mkv,.webm,.avi";
 const BOTH_ACCEPT = `${AUDIO_ACCEPT},${VIDEO_ACCEPT}`;
-const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
 const BOTH_EXTENSIONS = new Set([...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS]);
 
@@ -65,6 +65,14 @@ const SCHEMES: Record<AppMode, Scheme> = {
     label: "Arrastra tu vídeo para subtitular",
     color: "amber",
   },
+  convert: {
+    allowed: BOTH_EXTENSIONS,
+    accept: BOTH_ACCEPT,
+    formats: ["MP3", "WAV", "FLAC", "M4A", "OGG", "MP4"],
+    dropIcon: <ArrowRightLeft className="w-7 h-7" />,
+    label: "Arrastra el audio (o vídeo) a convertir",
+    color: "rose",
+  },
 };
 
 /** Color-keyed class lookups — Tailwind needs literal class names, not interpolated strings. */
@@ -104,6 +112,14 @@ const COLOR_CLASSES: Record<string, {
     borderIdle12: "hover:border-amber-500/50", bgIdleHover5: "hover:bg-amber-500/5",
     bgGlow: "bg-amber-500", radial: "rgba(251,191,36,0.08)",
     pillBorder: "border-amber-500/25", pillText: "text-amber-300/60", pillBg: "bg-amber-500/8",
+  },
+  rose: {
+    border40: "border-rose-500/40", bg8: "bg-rose-500/8", bg20: "bg-rose-500/20",
+    text400: "text-rose-400", bg500: "bg-rose-500", text300_60: "text-rose-300/60",
+    borderHover50: "border-rose-400/50", bgHover12: "bg-rose-500/12",
+    borderIdle12: "hover:border-rose-500/50", bgIdleHover5: "hover:bg-rose-500/5",
+    bgGlow: "bg-rose-500", radial: "rgba(244,63,94,0.06)",
+    pillBorder: "border-rose-500/25", pillText: "text-rose-300/60", pillBg: "bg-rose-500/8",
   },
 };
 

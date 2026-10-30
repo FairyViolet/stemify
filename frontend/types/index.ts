@@ -1,4 +1,8 @@
-export type AppMode = "music" | "video" | "speech" | "subtitles";
+export type AppMode = "music" | "video" | "speech" | "subtitles" | "convert";
+
+export type AudioFormat =
+  | "wav32" | "wav24" | "wav16" | "flac"
+  | "mp3_320" | "mp3_192" | "m4a" | "ogg" | "opus";
 
 export type MusicMode = "2stem" | "4stem";
 export type SeparationQuality = "roformer" | "high" | "standard";

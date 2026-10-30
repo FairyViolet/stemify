@@ -7,9 +7,10 @@ import { StemResultCard } from "./StemResultCard";
 interface Props {
   job: Job;
   onReset: () => void;
+  title?: string;
 }
 
-export function DownloadSection({ job, onReset }: Props) {
+export function DownloadSection({ job, onReset, title = "Pistas separadas" }: Props) {
   return (
     <div className="space-y-4">
       {/* Success banner */}
@@ -29,7 +30,7 @@ export function DownloadSection({ job, onReset }: Props) {
 
       {/* Step label */}
       <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-        Pistas separadas
+        {title}
       </p>
 
       {/* Stem cards */}

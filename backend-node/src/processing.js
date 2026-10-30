@@ -1,7 +1,9 @@
 const path = require("path");
 const fs = require("fs");
 const { updateJob } = require("./jobs");
-const { extractAudio, removeAudio, hasAudioStream } = require("./ffmpeg");
+const {
+  AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT, convertAudio, extractAudio, removeAudio, hasAudioStream,
+} = require("./ffmpeg");
 const { runDemucs, stemLabel, extractStemSuffix } = require("./demucs");
 
 function fileSize(p) {
@@ -19,9 +21,62 @@ function safeDest(outputDir, srcPath, label) {
 }
 
 /**
+ * Convert the finished .wav outputs (32-bit float) to the format the user
+ * picked. WAV 32-bit is already what we have, so it is left as is. Peaks
+ * above 0 dBFS are smoothed instead of clipped (see PEAK_GUARD).
+ *
+ * @returns {Promise<Array>} jobFiles with updated names and sizes
+ */
+async function exportAudioFiles(jobId, outputDir, jobFiles, formatId) {
+  if (!formatId || formatId === DEFAULT_AUDIO_FORMAT) return jobFiles;
+  const fmt = AUDIO_FORMATS[formatId];
+  updateJob(jobId, { stage: `Convirtiendo a ${fmt.label}`, progress: 90 });
+
+  const result = [];
+  for (const f of jobFiles) {
+    if (!f.filename.endsWith(".wav")) { result.push(f); continue; }
+    const src = path.join(outputDir, f.filename);
+    const name = f.filename.replace(/\.wav$/, `.${fmt.ext}`);
+    const dest = path.join(outputDir, name);
+    // Write to a temp name first: WAV 16/24 would otherwise overwrite its own input.
+    const tmp = path.join(outputDir, `__tmp_${name}`);
+    await convertAudio(src, tmp, formatId, { peakGuard: true });
+    fs.rmSync(src, { force: true });
+    fs.renameSync(tmp, dest);
+    result.push({ ...f, filename: name, size_bytes: fileSize(dest) });
+  }
+  return result;
+}
+
+/**
+ * Audio converter job: any audio/video file → chosen audio format.
+ */
+async function processConvertJob(jobId, uploadPath, formatId, outputDir) {
+  try {
+    updateJob(jobId, { status: "processing", stage: "Validating audio", progress: 10 });
+    const hasAudio = await hasAudioStream(uploadPath);
+    if (!hasAudio) throw new Error("El archivo no tiene pista de audio.");
+
+    const fmt = AUDIO_FORMATS[formatId];
+    updateJob(jobId, { stage: `Convirtiendo a ${fmt.label}`, progress: 40 });
+    const baseName = path.basename(uploadPath, path.extname(uploadPath));
+    const name = `${baseName}.${fmt.ext}`;
+    const dest = path.join(outputDir, name);
+    await convertAudio(uploadPath, dest, formatId);
+
+    updateJob(jobId, {
+      status: "completed", progress: 100, stage: "Completed",
+      files: [{ filename: name, label: `Audio convertido · ${fmt.label}`, size_bytes: fileSize(dest) }],
+    });
+  } catch (err) {
+    updateJob(jobId, { status: "failed", stage: "Failed", error: err.message });
+  }
+}
+
+/**
  * Music separation job runner
  */
-async function processMusicJob(jobId, uploadPath, mode, outputDir, quality) {
+async function processMusicJob(jobId, uploadPath, mode, outputDir, quality, outputFormat) {
   try {
     updateJob(jobId, { status: "processing", stage: "Validating audio", progress: 5 });
 
@@ -53,7 +108,8 @@ async function processMusicJob(jobId, uploadPath, mode, outputDir, quality) {
       });
     }
 
-    updateJob(jobId, { status: "completed", progress: 100, stage: "Completed", files: jobFiles });
+    const exported = await exportAudioFiles(jobId, outputDir, jobFiles, outputFormat);
+    updateJob(jobId, { status: "completed", progress: 100, stage: "Completed", files: exported });
   } catch (err) {
     updateJob(jobId, { status: "failed", stage: "Failed", error: err.message });
   }
@@ -69,6 +125,7 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
     separate_voice_music,
     separate_music_stems,
     quality,
+    output_format,
   } = options;
 
   try {
@@ -147,10 +204,11 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
     const seen = new Set();
     const unique = jobFiles.filter((f) => { if (seen.has(f.filename)) return false; seen.add(f.filename); return true; });
 
-    updateJob(jobId, { stage: "Completed", progress: 100, status: "completed", files: unique });
+    const exported = await exportAudioFiles(jobId, outputDir, unique, output_format);
+    updateJob(jobId, { stage: "Completed", progress: 100, status: "completed", files: exported });
   } catch (err) {
     updateJob(jobId, { status: "failed", stage: "Failed", error: err.message });
   }
 }
 
-module.exports = { processMusicJob, processVideoJob };
+module.exports = { processMusicJob, processVideoJob, processConvertJob };

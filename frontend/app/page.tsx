@@ -11,11 +11,13 @@ import { DownloadSection } from "@/components/DownloadSection";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { LegalNotice } from "@/components/LegalNotice";
 import { BackendStatusBanner } from "@/components/BackendStatusBanner";
-import { submitMusicJob, submitVideoJob, fetchJob, deleteJob } from "@/lib/api";
+import { submitMusicJob, submitVideoJob, submitConvertJob, fetchJob, deleteJob } from "@/lib/api";
+import { AudioFormatPicker } from "@/components/AudioFormatPicker";
+import { AUDIO_FORMAT_OPTIONS } from "@/lib/audioFormats";
 import { useBackendStatus } from "@/lib/useBackendStatus";
 import { SpeechToText } from "@/components/SpeechToText";
 import { DynamicSubtitles } from "@/components/DynamicSubtitles";
-import type { AppMode, MusicMode, SeparationQuality, Job, VideoOptions } from "@/types";
+import type { AppMode, AudioFormat, MusicMode, SeparationQuality, Job, VideoOptions } from "@/types";
 
 const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
   extract_full_audio: true,
@@ -26,6 +28,31 @@ const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
 
 type UIState = "idle" | "uploading" | "processing" | "completed" | "failed";
 
+/**
+ * Audio format choice remembered between visits (per-browser convenience).
+ * Separation and converter keep separate choices.
+ */
+function useRememberedFormat(key: string, fallback: AudioFormat) {
+  const [format, setFormat] = useState<AudioFormat>(fallback);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved && AUDIO_FORMAT_OPTIONS.some((o) => o.id === saved)) setFormat(saved as AudioFormat);
+    } catch {}
+  }, [key]);
+  const update = useCallback((f: AudioFormat) => {
+    setFormat(f);
+    try { localStorage.setItem(key, f); } catch {}
+  }, [key]);
+  return [format, update] as const;
+}
+
+const SUBMIT_LABEL: Partial<Record<AppMode, string>> = {
+  music: "Separar Audio",
+  video: "Procesar Vídeo",
+  convert: "Convertir Audio",
+};
+
 export default function HomePage() {
   const [appMode, setAppMode] = useState<AppMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -33,6 +60,8 @@ export default function HomePage() {
   // null = not chosen yet: use the best engine the backend has installed
   const [musicQuality, setMusicQuality] = useState<SeparationQuality | null>(null);
   const [videoOptions, setVideoOptions] = useState<VideoOptions>(DEFAULT_VIDEO_OPTIONS);
+  const [stemFormat, setStemFormat] = useRememberedFormat("stemify.stemFormat", "wav32");
+  const [convertFormat, setConvertFormat] = useRememberedFormat("stemify.convertFormat", "mp3_320");
   const [uiState, setUiState] = useState<UIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -93,7 +122,7 @@ export default function HomePage() {
     uiState === "idle" &&
     backendReachable &&
     ffmpegOk &&
-    (appMode === "music" || Object.values(videoOptions).some(Boolean)) &&
+    (appMode === "music" || appMode === "convert" || Object.values(videoOptions).some(Boolean)) &&
     (!needsDemucs || demucsOk);
 
   const handleSubmit = async () => {
@@ -105,9 +134,11 @@ export default function HomePage() {
     try {
       let result: { job_id: string };
       if (appMode === "music") {
-        result = await submitMusicJob(file, musicMode, effectiveQuality);
+        result = await submitMusicJob(file, musicMode, effectiveQuality, stemFormat);
+      } else if (appMode === "convert") {
+        result = await submitConvertJob(file, convertFormat);
       } else {
-        result = await submitVideoJob(file, videoOptions);
+        result = await submitVideoJob(file, videoOptions, stemFormat);
       }
 
       const initial: Job = {
@@ -230,7 +261,7 @@ export default function HomePage() {
 
             {file && (
               <>
-                {appMode === "music" ? (
+                {appMode === "music" && (
                   <MusicSeparationOptions
                     selected={musicMode}
                     onChange={setMusicMode}
@@ -238,8 +269,28 @@ export default function HomePage() {
                     onQualityChange={setMusicQuality}
                     roformerAvailable={roformerOk}
                   />
-                ) : (
+                )}
+                {appMode === "video" && (
                   <VideoSeparationOptions options={videoOptions} onChange={setVideoOptions} />
+                )}
+
+                {appMode === "convert" ? (
+                  <AudioFormatPicker
+                    title="Step 3 — Convertir a"
+                    value={convertFormat}
+                    onChange={setConvertFormat}
+                    note="Se mantienen el volumen y los datos de la canción (título, artista). La carátula no se copia."
+                  />
+                ) : (appMode === "music" || videoOptions.extract_full_audio
+                    || videoOptions.separate_voice_music || videoOptions.separate_music_stems) && (
+                  <AudioFormatPicker
+                    title="Formato de descarga"
+                    value={stemFormat}
+                    onChange={setStemFormat}
+                    note={stemFormat === "wav32"
+                      ? "WAV 32-bit conserva el volumen exacto: las pistas sumadas dan la canción original."
+                      : "Mismo volumen que el original. Si algún pico pasa del máximo, se suaviza en vez de distorsionar."}
+                  />
                 )}
 
                 {/* Submit button */}
@@ -260,7 +311,7 @@ export default function HomePage() {
                   >
                     <span className="relative z-10 flex items-center justify-center gap-2">
                       <span>✨</span>
-                      Separar Audio
+                      {SUBMIT_LABEL[appMode] ?? "Procesar"}
                     </span>
                     {canSubmit && (
                       <div className="absolute inset-0 rounded-2xl overflow-hidden">
@@ -308,7 +359,11 @@ export default function HomePage() {
 
         {/* Results */}
         {showCompleted && job && (
-          <DownloadSection job={job} onReset={handleReset} />
+          <DownloadSection
+            job={job}
+            onReset={handleReset}
+            title={appMode === "convert" ? "Archivo convertido" : "Pistas separadas"}
+          />
         )}
 
         {/* Error */}

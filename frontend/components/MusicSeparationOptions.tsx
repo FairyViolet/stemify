@@ -159,9 +159,6 @@ export function MusicSeparationOptions({ selected, onChange, quality, onQualityC
           );
         })}
       </div>
-      <p className="text-white/30 text-[11px] mt-2">
-        Las pistas se exportan en WAV de 32 bits: conservan el volumen exacto de la canción original.
-      </p>
     </div>
   );
 }
