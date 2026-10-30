@@ -1,6 +1,6 @@
 "use client";
 
-import { Music2, Video, Mic, Captions, Check } from "lucide-react";
+import { Music2, Video, Mic, Captions, Check, ArrowRightLeft } from "lucide-react";
 import type { AppMode } from "@/types";
 import { clsx } from "@/lib/utils";
 
@@ -76,6 +76,19 @@ function KaraokeWords() {
   );
 }
 
+/* Mini "MP3 → WAV" decoration */
+function FormatSwap() {
+  return (
+    <svg viewBox="0 0 90 24" className="w-full h-6 opacity-70">
+      <rect x="1" y="4" width="26" height="16" rx="4" fill="none" stroke="#fb7185" strokeWidth="1.2" />
+      <text x="14" y="15.5" fontSize="8" fontWeight="700" fill="#fda4af" textAnchor="middle">MP3</text>
+      <text x="45" y="16" fontSize="11" fontWeight="700" fill="#fb7185" textAnchor="middle">→</text>
+      <rect x="63" y="4" width="26" height="16" rx="4" fill="#fb7185" fillOpacity="0.2" stroke="#fb7185" strokeWidth="1.2" />
+      <text x="76" y="15.5" fontSize="8" fontWeight="700" fill="#ffe4e6" textAnchor="middle">WAV</text>
+    </svg>
+  );
+}
+
 const modes = [
   {
     id: "music" as AppMode,
@@ -141,6 +154,22 @@ const modes = [
     tagBg: "bg-amber-500/15 text-amber-300",
     checkBg: "bg-amber-500",
   },
+  {
+    id: "convert" as AppMode,
+    icon: <ArrowRightLeft className="w-7 h-7" />,
+    title: "Convertidor de Audio",
+    subtitle: "Cambia cualquier audio (o el audio de un video) a otro formato.",
+    tags: ["MP3", "WAV", "FLAC", "M4A", "OGG", "Opus"],
+    decoration: <FormatSwap />,
+    activeGlow: "shadow-[0_0_40px_rgba(244,63,94,0.25)]",
+    activeBorder: "border-rose-500/70",
+    activeBg: "from-rose-900/40 to-pink-900/20",
+    idleBg: "from-rose-900/10 to-pink-900/5",
+    iconBg: "bg-rose-500/20",
+    iconColor: "text-rose-300",
+    tagBg: "bg-rose-500/15 text-rose-300",
+    checkBg: "bg-rose-500",
+  },
 ] as const;
 
 export function ModeSelector({ selected, onChange }: Props) {
@@ -158,6 +187,8 @@ export function ModeSelector({ selected, onChange }: Props) {
               onClick={() => onChange(m.id)}
               className={clsx(
                 "relative group text-left rounded-2xl border p-5 transition-all duration-300 cursor-pointer overflow-hidden",
+                // Odd card out (the 5th) spans the full row
+                modes.length % 2 === 1 && m === modes[modes.length - 1] && "col-span-2",
                 "bg-gradient-to-br",
                 active
                   ? `${m.activeBorder} ${m.activeBg} ${m.activeGlow} scale-[1.02]`

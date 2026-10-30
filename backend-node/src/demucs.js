@@ -13,6 +13,25 @@ const STEM_LABELS = [
   ["other",     "Other Instruments"],
 ];
 
+// Separation quality presets.
+// - roformer: BS-RoFormer (the model behind Ultimate Vocal Remover) for the
+//   vocals — about +2.4 dB cleaner than htdemucs_ft on audio-separator's
+//   benchmark. In 4-stem mode Demucs then splits the instrumental.
+//   Needs `audio-separator` (instalar_ia.bat). Weights (~640 MB) download
+//   on first use into models/.
+// - high: htdemucs_ft — 4 models each fine-tuned on one source — run twice
+//   with random time shifts and averaged. ~8x slower than standard.
+//   Weights (~320 MB) download on first use.
+// - standard: the original htdemucs model, one pass (fastest).
+const QUALITY_PRESETS = {
+  roformer: { engine: "roformer", model: "htdemucs_ft", shifts: 1 },
+  high:     { engine: "demucs",   model: "htdemucs_ft", shifts: 2 },
+  standard: { engine: "demucs",   model: "htdemucs",    shifts: 1 },
+};
+const DEFAULT_QUALITY = "high";
+const ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt";
+const MODELS_DIR = path.resolve(__dirname, "..", "..", "models");
+
 // Known Python install paths on this machine (checked first for reliability)
 // IMPORTANT: venv paths come first — they have torch/demucs installed
 const KNOWN_PYTHON_PATHS = [
@@ -27,11 +46,11 @@ const KNOWN_PYTHON_PATHS = [
   "C:\\Python312\\python.exe",
 ];
 
-// Known demucs.exe paths
-const KNOWN_DEMUCS_PATHS = [
-  "C:\\Users\\User\\AppData\\Local\\Python\\pythoncore-3.14-64\\Scripts\\demucs.exe",
-  "C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\demucs.exe",
-];
+// With `shell: true` Node joins args with spaces, so any arg containing a
+// space (Python code, "S:\\Claude code\\..." paths) must be quoted to stay whole.
+function shellArgs(args, viaShell) {
+  return viaShell ? args.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : args;
+}
 
 function findPython() {
   // Try known absolute paths first (Windows App Aliases don't work with child_process)
@@ -69,7 +88,7 @@ function findDemucsPython() {
     if (isAbsolute && !fs.existsSync(p)) continue;
     const r = spawnSync(
       p,
-      ["-c", "import torch, torchaudio, soundfile, demucs"],
+      shellArgs(["-c", "import torch, torchaudio, soundfile, demucs"], !isAbsolute),
       { encoding: "utf8", timeout: 15000, shell: !isAbsolute }
     );
     if (r.status === 0) {
@@ -85,13 +104,47 @@ function checkDemucs() {
   return findDemucsPython() !== null;
 }
 
+// Cache: what the AI Python env can do (RoFormer installed? GPU visible?)
+let _cachedAiInfo = undefined;
+
 /**
- * Run Demucs separation.
- * Returns list of output .wav file paths.
+ * @returns {{ roformer: boolean, gpu: string|null, torch: string|null }}
  */
-async function runDemucs(audioPath, outputDir, mode, onProgress) {
-  // Use the wrapper script that patches torchaudio to avoid TorchCodec requirement
-  const WRAPPER = "C:\\stemify\\demucs_wrapper.py";
+function getAiInfo() {
+  if (_cachedAiInfo !== undefined) return _cachedAiInfo;
+  const fallback = { roformer: false, gpu: null, torch: null };
+  const python = findDemucsPython();
+  if (!python) return (_cachedAiInfo = fallback);
+
+  const isAbsolute = python.includes("\\") || python.includes("/");
+  // No double quotes inside: the whole snippet gets quoted for the shell.
+  const code =
+    "import json, importlib.util as u, torch; " +
+    "print(json.dumps({'roformer': u.find_spec('audio_separator') is not None and u.find_spec('onnxruntime') is not None, " +
+    "'gpu': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None, " +
+    "'torch': torch.__version__}))";
+  const r = spawnSync(python, shellArgs(["-c", code], !isAbsolute), {
+    encoding: "utf8", timeout: 30000, shell: !isAbsolute,
+  });
+  try {
+    _cachedAiInfo = { ...fallback, ...JSON.parse(r.stdout.trim().split("\n").pop()) };
+  } catch {
+    _cachedAiInfo = fallback;
+  }
+  return _cachedAiInfo;
+}
+
+const ffmpegPath = require("ffmpeg-static");
+
+const WORKER_SCRIPT = path.resolve(__dirname, "..", "..", "backend", "separation_worker.py");
+
+/**
+ * Run Demucs separation through backend/separation_worker.py.
+ * Returns list of output .wav file paths (32-bit float, original loudness).
+ *
+ * @param {"standard"|"high"} quality - see QUALITY_PRESETS
+ */
+async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAULT_QUALITY) {
   const python = findDemucsPython();
   if (!python) {
     throw new Error(
@@ -99,93 +152,77 @@ async function runDemucs(audioPath, outputDir, mode, onProgress) {
       "Ejecuta: pip install demucs soundfile torch torchaudio"
     );
   }
+  if (!fs.existsSync(WORKER_SCRIPT)) {
+    throw new Error(`Worker script no encontrado: ${WORKER_SCRIPT}`);
+  }
 
+  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS[DEFAULT_QUALITY];
+  const args = [
+    WORKER_SCRIPT,
+    "--input", audioPath,
+    "--output_dir", outputDir,
+    "--engine", preset.engine,
+    "--roformer_model", ROFORMER_MODEL,
+    "--model_dir", MODELS_DIR,
+    "--model", preset.model,
+    "--shifts", String(preset.shifts),
+    "--overlap", "0.25",
+  ];
+  if (mode === "2stem") args.push("--two_stems", "vocals");
+
+  console.log(`[demucs] running: ${python} ${args.join(" ")}`);
   const isAbsolute = python.includes("\\") || python.includes("/");
-  const executable = python;
-  const args = fs.existsSync(WRAPPER) ? [WRAPPER] : ["-m", "demucs"];
-
-  const model = "htdemucs";
-  args.push("--out", outputDir, "--name", model, "--filename", "{track}_{stem}.{ext}");
-  if (mode === "2stem") args.push("--two-stems", "vocals");
-  args.push(audioPath);
-
-  console.log(`[demucs] running: ${executable} ${args.join(" ")}`);
-
-  // Force torchaudio to use soundfile backend (avoids TorchCodec requirement on Windows)
-  const env = {
-    ...process.env,
-    TORCHAUDIO_BACKEND: "soundfile",
-    PYTORCH_ENABLE_MPS_FALLBACK: "1",
-  };
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(executable, args, { encoding: "utf8", env, shell: !isAbsolute });
-    let stderr = "";
+    const proc = spawn(python, shellArgs(args, !isAbsolute), {
+      shell: !isAbsolute,
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTORCH_ENABLE_MPS_FALLBACK: "1",
+        STEMIFY_FFMPEG_PATH: ffmpegPath,
+        // audio-separator refuses to start unless `ffmpeg` is on PATH
+        PATH: `${path.dirname(ffmpegPath)}${path.delimiter}${process.env.PATH || ""}`,
+      },
+    });
 
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk;
-      // Parse progress from demucs stderr output like "Separating track 45%"
-      const pct = stderr.match(/(\d+)%/g);
-      if (pct && onProgress) {
-        onProgress(parseInt(pct[pct.length - 1]));
+    let stderr = "";
+    let stdoutBuf = "";
+    let result = null;
+    let workerError = null;
+
+    proc.stdout.on("data", (chunk) => {
+      stdoutBuf += chunk.toString("utf8");
+      const lines = stdoutBuf.split("\n");
+      stdoutBuf = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let msg;
+        try { msg = JSON.parse(trimmed); } catch { continue; }
+        if (msg.error) workerError = msg.error;
+        else if (msg.done) result = msg;
+        else if (typeof msg.progress === "number" && onProgress) onProgress(msg.progress, msg.stage);
       }
     });
 
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        return reject(
-          new Error(`Demucs falló (código ${code}): ${stderr.slice(-1000)}`)
-        );
-      }
+    proc.stderr.on("data", (chunk) => {
+      stderr = (stderr + chunk.toString("utf8")).slice(-4000);
+    });
 
-      // Find output files
-      const baseName = path.basename(audioPath, path.extname(audioPath));
-      const stemDir = findStemDir(outputDir, model, baseName);
-      if (!stemDir) {
-        // Flat fallback
-        const flat = walkWav(outputDir);
-        return resolve(flat);
+    proc.on("close", (code) => {
+      if (workerError) return reject(new Error(`Demucs falló: ${workerError}`));
+      if (code !== 0 || !result) {
+        return reject(new Error(`Demucs falló (código ${code}): ${stderr.slice(-1000)}`));
       }
-      resolve(walkWav(stemDir));
+      console.log(`[demucs] ${preset.engine} done on ${result.device}: ${result.files.length} pistas`);
+      resolve(result.files);
     });
 
     proc.on("error", (err) => {
       reject(new Error(`No se pudo ejecutar Demucs: ${err.message}`));
     });
   });
-}
-
-function findStemDir(baseDir, model, trackName) {
-  const candidates = [
-    path.join(baseDir, model, trackName),
-    path.join(baseDir, trackName),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  // Walk up to 3 levels deep
-  function walk(dir, depth) {
-    if (depth <= 0) return null;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (entry.name === trackName) return path.join(dir, entry.name);
-        const found = walk(path.join(dir, entry.name), depth - 1);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-  return walk(baseDir, 3);
-}
-
-function walkWav(dir) {
-  const results = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isFile() && entry.name.endsWith(".wav")) results.push(full);
-    else if (entry.isDirectory()) results.push(...walkWav(full));
-  }
-  return results;
 }
 
 function stemLabel(filename) {
@@ -209,4 +246,4 @@ function extractStemSuffix(demucsFilename, trackBaseName) {
   return base;
 }
 
-module.exports = { checkDemucs, runDemucs, stemLabel, extractStemSuffix };
+module.exports = { QUALITY_PRESETS, DEFAULT_QUALITY, checkDemucs, getAiInfo, runDemucs, stemLabel, extractStemSuffix };

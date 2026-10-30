@@ -46,21 +46,31 @@ const jobs = new Map();
  * @property {number} created_at
  */
 
-function createJob() {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Job ids are always UUIDs — anything else could escape OUTPUT_DIR. */
+function isValidJobId(id) {
+  return typeof id === "string" && UUID_RE.test(id);
+}
+
+function createJob(id = uuidv4(), extra = {}) {
   const job = {
-    job_id: uuidv4(),
+    job_id: id,
     status: "queued",
     progress: 0,
     stage: "queued",
     error: null,
     files: [],
     created_at: Date.now(),
+    ...extra,
   };
   jobs.set(job.job_id, job);
+  persistJob(job);
   return job;
 }
 
 function getJob(id) {
+  if (!isValidJobId(id)) return null;
   // Check in-memory first
   if (jobs.has(id)) return jobs.get(id);
   // Fall back to disk (survives server restarts)
@@ -84,6 +94,7 @@ function updateJob(id, patch) {
 }
 
 function deleteJob(id) {
+  if (!isValidJobId(id)) return false;
   // Remove disk record too
   try { fs.unlinkSync(jobFile(id)); } catch {}
   return jobs.delete(id);
@@ -93,4 +104,4 @@ function getAllJobs() {
   return jobs;
 }
 
-module.exports = { createJob, getJob, updateJob, deleteJob, getAllJobs, persistJob };
+module.exports = { isValidJobId, createJob, getJob, updateJob, deleteJob, getAllJobs, persistJob };
