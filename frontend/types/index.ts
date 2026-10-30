@@ -7,11 +7,40 @@ export type AudioFormat =
 export type MusicMode = "2stem" | "4stem";
 export type SeparationQuality = "roformer" | "high" | "standard";
 
-export type SubtitleStyle = "pop" | "clean" | "classic";
+export type SubtitleStyle =
+  | "pop" | "box" | "karaoke" | "neon" | "reveal" | "oneword" | "clean" | "classic";
+
+export type HighlightMode = "color" | "box" | "karaoke" | "none";
+export type EntryAnimation = "none" | "fade" | "pop" | "slide";
+export type SubtitlePosition = "top" | "middle" | "bottom";
+
+/**
+ * Full subtitle design. Mirrors BASE_CONFIG in backend/subtitle_worker.py.
+ * Sizes are for a frame whose short side is 1080 px.
+ */
+export interface SubtitleConfig {
+  preset: SubtitleStyle;
+  font: string;
+  fontSize: number;
+  uppercase: boolean;
+  textColor: string;
+  highlightColor: string;
+  outlineColor: string;
+  outlineWidth: number;
+  shadow: number;
+  highlightMode: HighlightMode;
+  boxColor: string;
+  wordAnimation: SubtitleAnimation;
+  entryAnimation: EntryAnimation;
+  position: SubtitlePosition;
+  offset: number;      // % of the frame height from the chosen edge
+  maxWords: number;    // words on screen at once, 0 = whole phrase
+  revealWords: boolean;
+}
 
 export type SubtitleOrientation = "auto" | "horizontal" | "vertical";
 
-export type SubtitleAnimation = "pop" | "shake" | "flash" | "none";
+export type SubtitleAnimation = "pop" | "zoom" | "shake" | "flash" | "glow" | "none";
 
 export interface SubtitleWord {
   word: string;

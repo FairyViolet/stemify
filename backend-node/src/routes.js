@@ -32,6 +32,26 @@ function parseQuality(value) {
   return Object.hasOwn(QUALITY_PRESETS, quality) ? quality : null;
 }
 
+// Subtitle design presets (see backend/subtitle_worker.py PRESETS)
+const SUBTITLE_STYLES = new Set(["pop", "box", "karaoke", "neon", "reveal", "oneword", "clean", "classic"]);
+
+/**
+ * Parse the optional subtitle design overrides (object or JSON string).
+ * The Python worker validates every field; here we only bound the size.
+ * Returns {} when absent, null when invalid.
+ */
+function parseSubtitleConfig(value) {
+  if (value === undefined || value === null || value === "") return {};
+  let cfg = value;
+  if (typeof value === "string") {
+    if (value.length > 4000) return null;
+    try { cfg = JSON.parse(value); } catch { return null; }
+  }
+  if (typeof cfg !== "object" || Array.isArray(cfg)) return null;
+  if (JSON.stringify(cfg).length > 4000) return null;
+  return cfg;
+}
+
 function parseFormat(value) {
   const format = value || DEFAULT_AUDIO_FORMAT;
   return Object.hasOwn(AUDIO_FORMATS, format) ? format : null;
@@ -326,8 +346,7 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
   }
 
   const style = req.body.style || "pop";
-  const validStyles = new Set(["pop", "clean", "classic"]);
-  if (!validStyles.has(style)) {
+  if (!SUBTITLE_STYLES.has(style)) {
     return res.status(400).json({ detail: `Estilo no válido: ${style}` });
   }
 
@@ -343,7 +362,10 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const options = { style, orientation };
+  const config = parseSubtitleConfig(req.body.config);
+  if (!config) return res.status(400).json({ detail: "Configuración de diseño no válida." });
+
+  const options = { style, orientation, config };
   processSubtitlesJob(jobId, req.file.path, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
@@ -431,9 +453,8 @@ router.post("/subtitles/render/:jobId", (req, res) => {
 
   const { style, orientation, segments } = req.body || {};
 
-  const validStyles = new Set(["pop", "clean", "classic"]);
   const finalStyle = style || "pop";
-  if (!validStyles.has(finalStyle)) {
+  if (!SUBTITLE_STYLES.has(finalStyle)) {
     return res.status(400).json({ detail: `Estilo no válido: ${finalStyle}` });
   }
 
@@ -448,7 +469,10 @@ router.post("/subtitles/render/:jobId", (req, res) => {
   }
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
-  const options = { style: finalStyle, orientation: finalOrientation };
+  const config = parseSubtitleConfig(req.body?.config);
+  if (!config) return res.status(400).json({ detail: "Configuración de diseño no válida." });
+
+  const options = { style: finalStyle, orientation: finalOrientation, config };
   processRenderJob(jobId, inputPath, segments, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });

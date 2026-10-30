@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Captions, Check, Sparkles, Wand2, Monitor, Smartphone, PenLine, Zap } from "lucide-react";
+import { Download, Captions, Check, Sparkles, Monitor, Smartphone, PenLine, Zap, Shield, SlidersHorizontal } from "lucide-react";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { ProcessingProgress } from "@/components/ProcessingProgress";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { WordEmphasisEditor } from "@/components/WordEmphasisEditor";
+import { SubtitlePreview } from "@/components/SubtitlePreview";
+import { SubtitleDesigner } from "@/components/SubtitleDesigner";
 import {
   submitSubtitlesJob,
   submitTranscribeOnlyJob,
@@ -14,67 +16,26 @@ import {
   deleteJob,
   getDownloadUrl,
 } from "@/lib/api";
-import type { Job, SubtitleStyle, SubtitleOrientation, SubtitleSegment } from "@/types";
+import { presetConfig, PRESET_META } from "@/lib/subtitlePresets";
+import type { Job, SubtitleConfig, SubtitleSegment } from "@/types";
 import { clsx } from "@/lib/utils";
 
 type SubsUIState = "idle" | "uploading" | "processing" | "editing" | "completed" | "failed";
 type PendingAction = "full" | "transcribe" | "render";
 
-interface StylePreset {
-  value: SubtitleStyle;
-  label: string;
-  description: string;
-  preview: { active: string; rest: string[] };
+const DESIGN_KEY = "stemify.subtitleDesign";
+
+function loadSavedDesign(): SubtitleConfig | null {
+  try {
+    const raw = localStorage.getItem(DESIGN_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    // Merge over a fresh preset so designs saved by older versions stay valid
+    return saved?.preset ? { ...presetConfig(saved.preset, "vertical"), ...saved } : null;
+  } catch {
+    return null;
+  }
 }
-
-const STYLE_PRESETS: StylePreset[] = [
-  {
-    value: "pop",
-    label: "Pop (TikTok)",
-    description: "Texto grande, palabra activa en amarillo con efecto de rebote.",
-    preview: { active: "IS", rest: ["this", "so", "cool"] },
-  },
-  {
-    value: "clean",
-    label: "Clean",
-    description: "Más sutil — palabra activa resaltada en celeste, sin animación.",
-    preview: { active: "is", rest: ["this", "so", "cool"] },
-  },
-  {
-    value: "classic",
-    label: "Clásico",
-    description: "Subtítulo blanco tradicional por frase, sin resaltado de palabra.",
-    preview: { active: "", rest: ["this is so cool"] },
-  },
-];
-
-interface OrientationOption {
-  value: SubtitleOrientation;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-}
-
-const ORIENTATION_OPTIONS: OrientationOption[] = [
-  {
-    value: "auto",
-    label: "Auto-detectar",
-    description: "Lee el video y se adapta solo",
-    icon: <Wand2 className="w-4 h-4" />,
-  },
-  {
-    value: "horizontal",
-    label: "Horizontal",
-    description: "16:9 — YouTube, TV",
-    icon: <Monitor className="w-4 h-4" />,
-  },
-  {
-    value: "vertical",
-    label: "Vertical",
-    description: "9:16 — TikTok, Reels",
-    icon: <Smartphone className="w-4 h-4" />,
-  },
-];
 
 interface Props {
   onReset: () => void;
@@ -82,8 +43,15 @@ interface Props {
 
 export function DynamicSubtitles({ onReset }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [style, setStyle] = useState<SubtitleStyle>("pop");
-  const [orientation, setOrientation] = useState<SubtitleOrientation>("auto");
+  const [config, setConfig] = useState<SubtitleConfig>(() => presetConfig("pop", "vertical"));
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // Browsers can't read every format (e.g. some .avi/.mkv): then the user picks
+  const [probeFailed, setProbeFailed] = useState(false);
+  const [manualOrientation, setManualOrientation] = useState<"vertical" | "horizontal">("vertical");
+  const [showSafeZone, setShowSafeZone] = useState(true);
+  const [showDesigner, setShowDesigner] = useState(false);
+  const designTouched = useRef(false);
   const [uiState, setUiState] = useState<SubsUIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -132,6 +100,51 @@ export function DynamicSubtitles({ onReset }: Props) {
     return () => stopPolling();
   }, [stopPolling]);
 
+  // Restore the last design used in this browser
+  useEffect(() => {
+    const saved = loadSavedDesign();
+    if (saved) {
+      setConfig(saved);
+      designTouched.current = true;
+    }
+  }, []);
+
+  const updateConfig = useCallback((next: SubtitleConfig) => {
+    designTouched.current = true;
+    setConfig(next);
+    try { localStorage.setItem(DESIGN_KEY, JSON.stringify(next)); } catch {}
+  }, []);
+
+  // Local preview URL of the chosen video + its real size (vertical/horizontal)
+  useEffect(() => {
+    setDims(null);
+    setProbeFailed(false);
+    if (!file) { setVideoUrl(null); return; }
+    const url = URL.createObjectURL(file);
+    setVideoUrl(url);
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (probe.videoWidth && probe.videoHeight) setDims({ w: probe.videoWidth, h: probe.videoHeight });
+      else setProbeFailed(true);
+    };
+    probe.onerror = () => setProbeFailed(true);
+    const timer = setTimeout(() => setProbeFailed(true), 4000);
+    probe.addEventListener("loadedmetadata", () => clearTimeout(timer));
+    probe.src = url;
+    return () => { clearTimeout(timer); probe.removeAttribute("src"); URL.revokeObjectURL(url); };
+  }, [file]);
+
+  const orientation: "vertical" | "horizontal" = dims
+    ? (dims.w > dims.h ? "horizontal" : "vertical")
+    : manualOrientation;
+  const aspect = dims ? dims.w / dims.h : orientation === "vertical" ? 9 / 16 : 16 / 9;
+
+  // When the orientation becomes known, adapt the untouched default design to it
+  useEffect(() => {
+    if (!designTouched.current) setConfig((c) => presetConfig(c.preset, orientation));
+  }, [orientation]);
+
   // ── Fast path: transcribe + burn in one shot ────────────────────────────
   const handleSubmitFast = async () => {
     if (!file) return;
@@ -141,7 +154,7 @@ export function DynamicSubtitles({ onReset }: Props) {
     setJob(null);
 
     try {
-      const result = await submitSubtitlesJob(file, style, orientation);
+      const result = await submitSubtitlesJob(file, config.preset, "auto", config);
       setJob({ job_id: result.job_id, status: "queued", progress: 0, stage: "En cola...", error: null, files: [] });
       setUiState("processing");
       startPolling(result.job_id);
@@ -178,7 +191,7 @@ export function DynamicSubtitles({ onReset }: Props) {
     setUiState("processing");
 
     try {
-      const result = await submitRenderJob(job.job_id, style, orientation, segments);
+      const result = await submitRenderJob(job.job_id, config.preset, "auto", segments, config);
       setJob({ job_id: result.job_id, status: "queued", progress: 0, stage: "En cola...", error: null, files: [] });
       startPolling(result.job_id);
     } catch (err) {
@@ -217,11 +230,21 @@ export function DynamicSubtitles({ onReset }: Props) {
           <div className="flex-1">
             <p className="text-emerald-300 font-semibold">¡Video subtitulado listo!</p>
             <p className="text-emerald-400/50 text-xs mt-0.5">
-              Subtítulos {STYLE_PRESETS.find((s) => s.value === style)?.label} quemados directamente en el video
+              Estilo {PRESET_META.find((p) => p.id === config.preset)?.label} quemado directamente en el video
             </p>
           </div>
           <Sparkles className="w-4 h-4 text-emerald-400/50" />
         </div>
+
+        {videoFile && (
+          <video
+            src={getDownloadUrl(job.job_id, videoFile.filename)}
+            controls
+            playsInline
+            className="mx-auto rounded-xl border border-white/10 bg-black"
+            style={orientation === "vertical" ? { maxHeight: 520 } : { width: "100%" }}
+          />
+        )}
 
         {videoFile && (
           <a
@@ -269,7 +292,23 @@ export function DynamicSubtitles({ onReset }: Props) {
   if (showEditing && segments) {
     return (
       <div className="space-y-5">
-        <WordEmphasisEditor segments={segments} onChange={setSegments} />
+        <SubtitlePreview
+          config={config}
+          aspect={aspect}
+          videoUrl={videoUrl}
+          segments={segments}
+          showSafeZone={showSafeZone}
+        />
+        <button
+          type="button"
+          onClick={() => setShowDesigner((v) => !v)}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 text-white/60 hover:text-white/90 hover:border-amber-500/30 transition-all text-xs"
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+          {showDesigner ? "Ocultar ajustes de diseño" : "Ajustar diseño (posición, colores, animaciones…)"}
+        </button>
+        {showDesigner && <SubtitleDesigner config={config} onChange={updateConfig} orientation={orientation} />}
+        <WordEmphasisEditor segments={segments} onChange={setSegments} defaultAnimation={config.wordAnimation} />
         <div className="pt-1 space-y-2">
           <button
             onClick={handleRenderEdited}
@@ -319,95 +358,67 @@ export function DynamicSubtitles({ onReset }: Props) {
 
       {file && (
         <>
-          {/* Style picker */}
+          {/* Design: live preview + controls */}
           <div className="space-y-3">
-            <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-              Step 3 — Elige el estilo
-            </p>
-            <div className="grid gap-3">
-              {STYLE_PRESETS.map((preset) => {
-                const active = style === preset.value;
-                return (
-                  <button
-                    key={preset.value}
-                    onClick={() => setStyle(preset.value)}
-                    className={clsx(
-                      "text-left rounded-2xl border p-4 transition-all duration-200",
-                      active
-                        ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/20"
-                        : "border-white/10 bg-white/3 hover:border-amber-500/30 hover:bg-amber-500/5"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white font-semibold text-sm">{preset.label}</span>
-                      {active && (
-                        <div className="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center">
-                          <Check className="w-3 h-3 text-white" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-white/40 text-xs mb-3">{preset.description}</p>
-
-                    {/* Mini preview */}
-                    <div className="rounded-lg bg-black/40 px-4 py-3 flex items-center justify-center gap-1.5">
-                      {preset.preview.rest.map((w, i) => (
-                        <span key={i} className="text-white/70 text-xs font-bold">{w}</span>
-                      ))}
-                      {preset.preview.active && (
-                        <span className={clsx(
-                          "text-sm font-extrabold",
-                          preset.value === "pop" ? "text-amber-400 scale-110" : "text-cyan-300"
-                        )}>
-                          {preset.preview.active}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Orientation picker */}
-          <div className="space-y-3">
-            <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-              Step 4 — Orientación del video
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {ORIENTATION_OPTIONS.map((opt) => {
-                const active = orientation === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => setOrientation(opt.value)}
-                    className={clsx(
-                      "flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-all duration-200",
-                      active
-                        ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/20"
-                        : "border-white/10 bg-white/3 hover:border-amber-500/30 hover:bg-amber-500/5"
-                    )}
-                  >
-                    <span className={active ? "text-amber-400" : "text-white/40"}>{opt.icon}</span>
-                    <span className={clsx("text-xs font-semibold", active ? "text-white" : "text-white/60")}>
-                      {opt.label}
-                    </span>
-                    <span className="text-[10px] text-white/30 text-center leading-tight">{opt.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {orientation === "auto" && (
-              <p className="text-[11px] text-white/25 flex items-center gap-1">
-                <span>ℹ</span>
-                Detecta automáticamente si tu video es horizontal o vertical y ajusta tamaño de texto y posición.
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
+                Step 3 — Diseña tus subtítulos
               </p>
-            )}
+              {probeFailed && !dims ? (
+                <span className="flex items-center gap-1.5 text-[11px] text-white/50">
+                  Tu video es:
+                  {(["vertical", "horizontal"] as const).map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => setManualOrientation(o)}
+                      className={clsx(
+                        "flex items-center gap-1 rounded-full border px-2.5 py-0.5 transition-colors",
+                        manualOrientation === o
+                          ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
+                          : "border-white/15 text-white/50 hover:text-white/80"
+                      )}
+                    >
+                      {o === "vertical" ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
+                      {o === "vertical" ? "Vertical" : "Horizontal"}
+                    </button>
+                  ))}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-[11px] text-amber-300/80 border border-amber-500/25 bg-amber-500/8 rounded-full px-2.5 py-0.5">
+                  {orientation === "vertical" ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
+                  {dims ? `Video ${orientation} · ${dims.w}×${dims.h}` : "Detectando formato del video…"}
+                </span>
+              )}
+            </div>
+
+            <div className={clsx(
+              "gap-4",
+              orientation === "vertical" ? "grid sm:grid-cols-[auto_1fr] items-start" : "space-y-4"
+            )}>
+              <div className={clsx(orientation === "vertical" && "sm:sticky sm:top-4")}>
+                <SubtitlePreview
+                  config={config}
+                  aspect={aspect}
+                  videoUrl={videoUrl}
+                  showSafeZone={showSafeZone}
+                  maxHeight={orientation === "vertical" ? 460 : 380}
+                />
+                {orientation === "vertical" && (
+                  <label className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-white/45 cursor-pointer">
+                    <input type="checkbox" checked={showSafeZone} onChange={(e) => setShowSafeZone(e.target.checked)} className="accent-amber-500" />
+                    <Shield className="w-3 h-3" /> Mostrar zona de botones de TikTok / Reels
+                  </label>
+                )}
+              </div>
+              <SubtitleDesigner config={config} onChange={updateConfig} orientation={orientation} />
+            </div>
           </div>
 
           {/* Action choice: fast vs. customize */}
           <div className="space-y-3">
             <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-              Step 5 — ¿Cómo querés generarlo?
+              Step 4 — ¿Cómo querés generarlo?
             </p>
 
             <button

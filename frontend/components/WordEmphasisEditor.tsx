@@ -8,6 +8,8 @@ import { clsx } from "@/lib/utils";
 interface Props {
   segments: SubtitleSegment[];
   onChange: (segments: SubtitleSegment[]) => void;
+  /** The design's animation, used for words without their own */
+  defaultAnimation?: SubtitleAnimation;
 }
 
 const COLOR_SWATCHES: { label: string; value: string }[] = [
@@ -28,8 +30,10 @@ const SIZE_OPTIONS: { label: string; value: number }[] = [
 
 const ANIMATION_OPTIONS: { label: string; value: SubtitleAnimation }[] = [
   { label: "Rebote", value: "pop" },
+  { label: "Zoom", value: "zoom" },
   { label: "Sacudida", value: "shake" },
   { label: "Destello", value: "flash" },
+  { label: "Neón", value: "glow" },
   { label: "Ninguna", value: "none" },
 ];
 
@@ -45,11 +49,11 @@ type WordPatch = Partial<{
   animation?: SubtitleAnimation;
 }>;
 
-export function WordEmphasisEditor({ segments, onChange }: Props) {
+export function WordEmphasisEditor({ segments, onChange, defaultAnimation = "pop" }: Props) {
   const [active, setActive] = useState<WordKey | null>(null);
 
   const emphasizedCount = segments.reduce(
-    (n, seg) => n + seg.words.filter((w) => w.color || w.sizeMultiplier || (w.animation && w.animation !== "pop")).length,
+    (n, seg) => n + seg.words.filter((w) => w.color || w.sizeMultiplier || w.animation !== undefined).length,
     0
   );
 
@@ -72,7 +76,7 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-[11px] uppercase tracking-[0.15em] text-white/30 font-semibold">
-          Step 5 — Destacá y corregí palabras
+          Destacá y corregí palabras
         </p>
         {emphasizedCount > 0 && (
           <span className="flex items-center gap-1 text-[10px] text-amber-300/70 font-medium">
@@ -92,7 +96,7 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
           <p key={si} className="leading-loose mb-1">
             {seg.words.map((w, wi) => {
               const isOpen = active?.segIdx === si && active?.wordIdx === wi;
-              const hasOverride = !!(w.color || w.sizeMultiplier || (w.animation && w.animation !== "pop"));
+              const hasOverride = !!(w.color || w.sizeMultiplier || w.animation !== undefined);
               return (
                 <span key={wi} className="relative inline-block">
                   <button
@@ -179,7 +183,7 @@ export function WordEmphasisEditor({ segments, onChange }: Props) {
                             onClick={() => updateWord(si, wi, { animation: a.value })}
                             className={clsx(
                               "text-[10px] py-1.5 rounded-lg border font-medium transition-colors",
-                              (w.animation ?? "pop") === a.value
+                              (w.animation ?? defaultAnimation) === a.value
                                 ? "border-amber-500 bg-amber-500/20 text-white"
                                 : "border-white/15 text-white/50 hover:border-white/30"
                             )}

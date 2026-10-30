@@ -1,4 +1,4 @@
-import type { Job, BackendStatus, VideoOptions, SubtitleSegment } from "@/types";
+import type { Job, BackendStatus, VideoOptions, SubtitleSegment, SubtitleConfig } from "@/types";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -115,12 +115,14 @@ export async function submitTranscriptionJob(
 export async function submitSubtitlesJob(
   file: File,
   style: string,
-  orientation: string
+  orientation: string,
+  config?: SubtitleConfig
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("style", style);
   form.append("orientation", orientation);
+  if (config) form.append("config", JSON.stringify(config));
 
   let res: Response;
   try {
@@ -166,14 +168,15 @@ export async function submitRenderJob(
   jobId: string,
   style: string,
   orientation: string,
-  segments: SubtitleSegment[]
+  segments: SubtitleSegment[],
+  config?: SubtitleConfig
 ): Promise<{ job_id: string }> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/api/subtitles/render/${jobId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ style, orientation, segments }),
+      body: JSON.stringify({ style, orientation, segments, config }),
     });
   } catch (err) {
     throw friendlyError(err);

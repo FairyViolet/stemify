@@ -74,6 +74,16 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
   sumadas, las pistas reconstruyen la canción. En los demás formatos, si algún
   pico pasa del máximo se suaviza en vez de distorsionar.
 
+### Subtítulos Dinámicos (vídeo)
+- **8 plantillas**: Pop TikTok, Caja, Karaoke, Neón, Palabra a palabra, Una palabra, Limpio y Clásico.
+- **Diseño a medida**: posición (arriba / centro / abajo + distancia del borde), fuente, tamaño,
+  palabras en pantalla, mayúsculas, colores, borde, sombra, resaltado (color, caja, karaoke),
+  animación de la palabra (rebote, zoom, sacudida, destello, neón) y de entrada de cada frase.
+- **Vista previa en vivo** sobre tu propio vídeo, en su formato real (vertical u horizontal),
+  con la zona de botones de TikTok / Reels marcada. En el editor de palabras la vista previa
+  sigue el audio real.
+- El último diseño usado se recuerda en el navegador.
+
 ### Convertidor de Audio (cualquier audio o vídeo)
 - Convierte a WAV, FLAC, MP3, M4A, OGG u Opus. Si subes un vídeo, extrae y convierte su audio.
 - Conserva el volumen y los datos (título, artista); no copia la carátula.
