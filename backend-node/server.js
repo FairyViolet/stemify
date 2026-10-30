@@ -23,7 +23,8 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.use(express.json());
+// Large limit: the subtitle editor posts every word of the video as JSON.
+app.use(express.json({ limit: "20mb" }));
 
 app.get("/health", (req, res) => res.json({ status: "ok", runtime: "node" }));
 

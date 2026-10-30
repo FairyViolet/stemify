@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 
-const { getJob, updateJob, deleteJob: removeJob, getAllJobs, createJob } = require("./jobs");
+const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
 const { processMusicJob, processVideoJob } = require("./processing");
 const { checkDemucs } = require("./demucs");
@@ -20,8 +20,10 @@ const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB || "500") * 1024 * 1
 const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 const ALLOWED_VIDEO = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
 
+// Spaces are replaced too: Python workers are spawned through a shell when
+// "python" is on PATH, and a space would split the file path in two.
 function safeName(name) {
-  return path.basename(name).replace(/[^a-zA-Z0-9._\- ]/g, "_") || "upload";
+  return path.basename(name).replace(/[^a-zA-Z0-9._\-]/g, "_") || "upload";
 }
 
 function getExt(name) {
@@ -57,8 +59,21 @@ const upload = multer({
 // Middleware: attach a fresh jobId before multer processes the body
 function attachJobId(req, res, next) {
   req.__jobId = uuidv4();
+  // If the request is rejected after multer saved the file, drop it right
+  // away instead of leaving it orphaned in uploads/.
+  res.on("finish", () => {
+    if (res.statusCode >= 400) cleanupJobFiles(req.__jobId);
+  });
   next();
 }
+
+// Reject anything that is not a UUID before it reaches a filesystem path.
+function validateJobIdParam(req, res, next, id) {
+  if (!isValidJobId(id)) return res.status(400).json({ detail: "ID de job inválido." });
+  next();
+}
+router.param("id", validateJobIdParam);
+router.param("jobId", validateJobIdParam);
 
 // ──────────────────────────────────────────────
 // GET /api/status
@@ -87,11 +102,7 @@ router.post("/process/music", attachJobId, upload.single("file"), async (req, re
   }
 
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "Preparing file", progress: 10 });
+  createJob(jobId, { stage: "Preparing file", progress: 10 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
@@ -126,11 +137,7 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
   }
 
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "Preparing file", progress: 5 });
+  createJob(jobId, { stage: "Preparing file", progress: 5 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
@@ -172,10 +179,9 @@ router.get("/download/:id/:filename", (req, res) => {
   const filePath = path.join(OUTPUT_DIR, req.params.id, safe);
   if (!fs.existsSync(filePath)) return res.status(404).json({ detail: "El archivo procesado ya no existe en disco (fue limpiado automáticamente). Volvé a subir el archivo." });
 
-  // Explicit headers for cross-origin download support
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // CORS origin is already handled by the cors() middleware in server.js
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
-  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safe)}"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`);
   res.setHeader("Content-Type", "application/octet-stream");
   res.sendFile(path.resolve(filePath));
 });
@@ -228,11 +234,7 @@ router.post("/transcribe", attachJobId, upload.single("file"), async (req, res) 
   }
 
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "En cola...", progress: 0 });
+  createJob(jobId, { stage: "En cola...", progress: 0 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
@@ -285,10 +287,7 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
   }
 
   const jobId = req.__jobId;
-  getAllJobs().set(jobId, {
-    job_id: jobId, status: "queued", progress: 0,
-    stage: "En cola...", error: null, files: [], created_at: Date.now(),
-  });
+  createJob(jobId, { stage: "En cola..." });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
@@ -330,10 +329,7 @@ router.post("/subtitles/transcribe", attachJobId, upload.single("file"), async (
   }
 
   const jobId = req.__jobId;
-  getAllJobs().set(jobId, {
-    job_id: jobId, status: "queued", progress: 0,
-    stage: "En cola...", error: null, files: [], segments: null, created_at: Date.now(),
-  });
+  createJob(jobId, { stage: "En cola...", segments: null });
 
   // No outputDir needed yet — the uploaded video stays in uploads/{jobId}/
   // and is reused by /subtitles/render/:jobId below.
@@ -368,6 +364,9 @@ router.post("/subtitles/render/:jobId", (req, res) => {
   const jobId = req.params.jobId;
   const job = getJob(jobId);
   if (!job) return res.status(404).json({ detail: "Job no encontrado. Volvé a subir el video." });
+  if (job.status === "queued" || job.status === "processing") {
+    return res.status(409).json({ detail: "Este video todavía se está procesando. Esperá a que termine." });
+  }
 
   const uploadDir = path.join(UPLOAD_DIR, jobId);
   if (!fs.existsSync(uploadDir)) {
