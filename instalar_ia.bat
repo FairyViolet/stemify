@@ -12,7 +12,7 @@ echo.
 rem ---- 1. Entorno de Python del proyecto (carpeta venv) ----
 set "PY=%~dp0venv\Scripts\python.exe"
 if not exist "%PY%" (
-  echo [1/4] Creando entorno de Python en la carpeta venv ...
+  echo [1/5] Creando entorno de Python en la carpeta venv ...
   py -3 -m venv venv 2>nul || python -m venv venv
 )
 if not exist "%PY%" (
@@ -21,7 +21,7 @@ if not exist "%PY%" (
   pause
   exit /b 1
 )
-echo [1/4] Python del proyecto:
+echo [1/5] Python del proyecto:
 "%PY%" --version
 "%PY%" -m pip install --upgrade pip --quiet
 
@@ -29,11 +29,11 @@ rem ---- 2. PyTorch: con CUDA si hay una tarjeta NVIDIA ----
 echo.
 where nvidia-smi >nul 2>nul
 if errorlevel 1 (
-  echo [2/4] No se detecto una tarjeta NVIDIA: se usara la CPU, mas lento.
+  echo [2/5] No se detecto una tarjeta NVIDIA: se usara la CPU, mas lento.
   goto :torch_cpu
 )
 
-echo [2/4] Tarjeta NVIDIA detectada:
+echo [2/5] Tarjeta NVIDIA detectada:
 nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
 "%PY%" -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" >nul 2>nul
 if not errorlevel 1 (
@@ -56,7 +56,7 @@ echo         Actualiza el driver de NVIDIA y vuelve a ejecutar este archivo.
 
 rem ---- 3. Motores de separacion ----
 echo.
-echo [3/4] Instalando Demucs y RoFormer (audio-separator)...
+echo [3/5] Instalando Demucs y RoFormer (audio-separator)...
 "%PY%" -m pip install --upgrade "demucs>=4.0.1" soundfile "audio-separator[cpu]"
 if errorlevel 1 (
   echo  ERROR instalando los motores. Revisa el mensaje de arriba.
@@ -64,9 +64,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem ---- 4. Comprobacion ----
+rem ---- 4. Librerias de la app (Node) ----
 echo.
-echo [4/4] Comprobando...
+echo [4/5] Actualizando las librerias de la app...
+rem "call" es necesario: npm es un .cmd y sin call este archivo se cerraria.
+pushd "%~dp0backend-node" && call npm install --no-fund --no-audit && popd
+pushd "%~dp0frontend" && call npm install --no-fund --no-audit && popd
+
+rem ---- 5. Comprobacion ----
+echo.
+echo [5/5] Comprobando...
 "%PY%" -c "import torch, demucs, audio_separator; g = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None; print('   PyTorch', torch.__version__); print('   Aceleracion:', ('GPU ' + g) if g else 'CPU (sin GPU)')"
 
 echo.
