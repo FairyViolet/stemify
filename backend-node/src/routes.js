@@ -16,7 +16,9 @@ const router = express.Router();
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
-const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB || "500") * 1024 * 1024;
+// Stemify runs on the user's own PC, so long videos are fine (default 4 GB).
+const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "4096");
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
 const ALLOWED_VIDEO = new Set([
@@ -525,7 +527,7 @@ router.post("/subtitles/render/:jobId", (req, res) => {
 // Multer error handler
 router.use((err, req, res, next) => {
   if (err.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).json({ detail: `El archivo supera el límite de ${process.env.MAX_UPLOAD_MB || 500} MB.` });
+    return res.status(413).json({ detail: `El archivo supera el límite de ${MAX_UPLOAD_MB} MB.` });
   }
   res.status(400).json({ detail: err.message || "Error de carga." });
 });

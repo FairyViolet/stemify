@@ -153,7 +153,7 @@ export function UploadDropzone({ mode, file, onFile }: Props) {
     const ext = getExt(f.name);
     if (!scheme.allowed.has(ext))
       return `Tipo "${ext}" no soportado. Permitidos: ${[...scheme.allowed].join(", ")}`;
-    const maxMb = parseInt(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? "500");
+    const maxMb = parseInt(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? "4096");
     if (f.size > maxMb * 1024 * 1024)
       return `Archivo demasiado grande. Máximo: ${maxMb} MB.`;
     return null;

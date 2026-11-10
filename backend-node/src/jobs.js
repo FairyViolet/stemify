@@ -86,6 +86,8 @@ function updateJob(id, patch) {
   const job = jobs.get(id);
   if (!job) return null;
   Object.assign(job, patch);
+  // Files are kept for TEMP_FILE_TTL_MINUTES after the job ENDS (see cleanup.js)
+  if (patch.status === "completed" || patch.status === "failed") job.finished_at = Date.now();
   // Persist to disk on every status change so jobs survive server restarts
   if (patch.status) {
     persistJob(job);

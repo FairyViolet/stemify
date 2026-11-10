@@ -19,7 +19,10 @@ function cleanupJobFiles(jobId) {
 function runCleanup() {
   const now = Date.now();
   for (const [jobId, job] of getAllJobs()) {
-    if (now - job.created_at > TTL_MS) {
+    // Never delete a job that is still running (a long video can take more
+    // than the TTL); finished ones get the full TTL to be downloaded.
+    if (job.status === "queued" || job.status === "processing") continue;
+    if (now - (job.finished_at || job.created_at) > TTL_MS) {
       cleanupJobFiles(jobId);
       deleteJob(jobId);
     }

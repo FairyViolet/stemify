@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MAX_UPLOAD_MB=500
+      - MAX_UPLOAD_MB=4096
       - TEMP_FILE_TTL_MINUTES=60
       - FRONTEND_URL=http://localhost:3000
       - UPLOAD_DIR=/app/uploads
