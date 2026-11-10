@@ -1,4 +1,4 @@
-import type { Job, BackendStatus, VideoOptions, SubtitleSegment, SubtitleConfig } from "@/types";
+import type { Job, BackendStatus, VideoOptions, SubtitleSegment, SubtitleConfig, CleanVoiceOptions } from "@/types";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -219,6 +219,33 @@ export async function submitConvertJob(
     throw friendlyError(err);
   }
 
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? `Error del servidor (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function submitCleanVoiceJob(
+  file: File,
+  options: CleanVoiceOptions,
+  outputFormat: string
+): Promise<{ job_id: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("denoise", String(options.denoise));
+  form.append("dereverb", String(options.dereverb));
+  form.append("lead_only", String(options.lead_only));
+  form.append("background", String(options.background));
+  form.append("normalize", String(options.normalize));
+  form.append("output_format", outputFormat);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/api/clean-voice`, { method: "POST", body: form });
+  } catch (err) {
+    throw friendlyError(err);
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail ?? `Error del servidor (${res.status})`);

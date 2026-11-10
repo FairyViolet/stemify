@@ -1,4 +1,12 @@
-export type AppMode = "music" | "video" | "speech" | "subtitles" | "convert";
+export type AppMode = "music" | "video" | "speech" | "subtitles" | "convert" | "clean";
+
+export interface CleanVoiceOptions {
+  denoise: boolean;
+  dereverb: boolean;
+  lead_only: boolean;
+  background: number;   // % of the removed background mixed back (0-30)
+  normalize: boolean;   // loudness to -14 LUFS
+}
 
 export type AudioFormat =
   | "wav32" | "wav24" | "wav16" | "flac"

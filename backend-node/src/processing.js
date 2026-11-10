@@ -2,9 +2,10 @@ const path = require("path");
 const fs = require("fs");
 const { updateJob } = require("./jobs");
 const {
-  AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT, convertAudio, extractAudio, removeAudio, hasAudioStream,
+  AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT, convertAudio, normalizeLoudness, replaceVideoAudio,
+  extractAudio, removeAudio, hasAudioStream,
 } = require("./ffmpeg");
-const { runDemucs, stemLabel, extractStemSuffix } = require("./demucs");
+const { runDemucs, runVoiceClean, stemLabel, extractStemSuffix } = require("./demucs");
 
 function fileSize(p) {
   try { return fs.statSync(p).size; } catch { return 0; }
@@ -68,6 +69,61 @@ async function processConvertJob(jobId, uploadPath, formatId, outputDir) {
       status: "completed", progress: 100, stage: "Completed",
       files: [{ filename: name, label: `Audio convertido · ${fmt.label}`, size_bytes: fileSize(dest) }],
     });
+  } catch (err) {
+    updateJob(jobId, { status: "failed", stage: "Failed", error: err.message });
+  }
+}
+
+/**
+ * Voice cleanup job: keep only the main voice of a video or audio file.
+ * For a video, its soundtrack is replaced by the clean audio.
+ *
+ * @param {{ isVideo: boolean, denoise: boolean, dereverb: boolean, lead: boolean,
+ *           background: number, normalize: boolean, output_format: string }} options
+ */
+async function processCleanVoiceJob(jobId, uploadPath, options, outputDir) {
+  try {
+    updateJob(jobId, { status: "processing", stage: "Validating audio", progress: 3 });
+    const hasAudio = await hasAudioStream(uploadPath);
+    if (!hasAudio) throw new Error("El archivo no tiene pista de audio.");
+
+    const baseName = path.basename(uploadPath, path.extname(uploadPath));
+    updateJob(jobId, { stage: "Extracting audio", progress: 5 });
+    const workDir = path.join(outputDir, "_work");
+    fs.mkdirSync(workDir, { recursive: true });
+    const sourceWav = path.join(workDir, `${baseName}.wav`);
+    await extractAudio(uploadPath, sourceWav);
+
+    const files = await runVoiceClean(sourceWav, outputDir, options, (pct, stage) => {
+      updateJob(jobId, { progress: Math.round(8 + pct * 0.77), ...(stage && { stage }) });
+    });
+
+    // Track that goes into the video: the voice, or voice + a bit of background
+    let finalAudio = files.mix || files.voice;
+    if (options.normalize) {
+      updateJob(jobId, { stage: "Igualando volumen para redes", progress: 87 });
+      const normalized = path.join(outputDir, path.basename(finalAudio, ".wav") + "_normalizado.wav");
+      await normalizeLoudness(finalAudio, normalized);
+      fs.rmSync(finalAudio, { force: true });
+      if (files.mix) files.mix = normalized; else files.voice = normalized;
+      finalAudio = normalized;
+    }
+
+    const jobFiles = [];
+    if (options.isVideo) {
+      updateJob(jobId, { stage: "Uniendo el audio limpio al video", progress: 90 });
+      const videoName = `${baseName}_voz_limpia.mp4`;
+      await replaceVideoAudio(uploadPath, finalAudio, path.join(outputDir, videoName));
+      jobFiles.push({ filename: videoName, label: "Video con voz limpia", size_bytes: fileSize(path.join(outputDir, videoName)) });
+    }
+    const entry = (p, label) => ({ filename: path.basename(p), label, size_bytes: fileSize(p) });
+    jobFiles.push(entry(files.voice, "Voz limpia"));
+    if (files.mix) jobFiles.push(entry(files.mix, "Audio limpio (voz + fondo suave)"));
+    jobFiles.push(entry(files.background, "Fondo eliminado (música y ruido)"));
+    fs.rmSync(workDir, { recursive: true, force: true });
+
+    const exported = await exportAudioFiles(jobId, outputDir, jobFiles, options.output_format);
+    updateJob(jobId, { status: "completed", progress: 100, stage: "Completed", files: exported });
   } catch (err) {
     updateJob(jobId, { status: "failed", stage: "Failed", error: err.message });
   }
@@ -211,4 +267,4 @@ async function processVideoJob(jobId, uploadPath, options, outputDir) {
   }
 }
 
-module.exports = { processMusicJob, processVideoJob, processConvertJob };
+module.exports = { processMusicJob, processVideoJob, processConvertJob, processCleanVoiceJob };

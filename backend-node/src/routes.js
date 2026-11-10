@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 
 const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
-const { processMusicJob, processVideoJob, processConvertJob } = require("./processing");
+const { processMusicJob, processVideoJob, processConvertJob, processCleanVoiceJob } = require("./processing");
 const { AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT } = require("./ffmpeg");
 const { checkDemucs, getAiInfo, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
@@ -19,7 +19,10 @@ const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
 const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB || "500") * 1024 * 1024;
 
 const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
-const ALLOWED_VIDEO = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
+const ALLOWED_VIDEO = new Set([
+  ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".3gp", ".flv", ".wmv",
+  ".ts", ".mts", ".m2ts", ".mpg", ".mpeg", ".ogv",
+]);
 
 // Spaces are replaced too: Python workers are spawned through a shell when
 // "python" is on PATH, and a space would split the file path in two.
@@ -126,8 +129,9 @@ router.get("/status", (req, res) => {
 router.post("/process/music", attachJobId, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
 
+  // Videos are fine too: the separation worker decodes the first audio track.
   const ext = getExt(req.file.originalname);
-  if (!ALLOWED_AUDIO.has(ext)) {
+  if (!ALLOWED_AUDIO.has(ext) && !ALLOWED_VIDEO.has(ext)) {
     return res.status(400).json({ detail: `Tipo no soportado: ${ext}` });
   }
 
@@ -163,7 +167,7 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const options = {
@@ -219,6 +223,45 @@ router.post("/convert", attachJobId, upload.single("file"), async (req, res) => 
 });
 
 // ──────────────────────────────────────────────
+// POST /api/clean-voice — keep only the main voice of a video or audio file
+// ──────────────────────────────────────────────
+router.post("/clean-voice", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const ext = getExt(req.file.originalname);
+  if (!ALLOWED_AUDIO.has(ext) && !ALLOWED_VIDEO.has(ext)) {
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}` });
+  }
+  if (!getAiInfo().roformer) {
+    return res.status(400).json({ detail: "La limpieza de voz necesita RoFormer. Ejecuta instalar_ia.bat en la carpeta de Stemify." });
+  }
+
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
+  const flag = (name, fallback) => (req.body[name] === undefined ? fallback : req.body[name] === "true");
+  const background = Math.max(0, Math.min(30, Number(req.body.background) || 0));
+  const options = {
+    isVideo: ALLOWED_VIDEO.has(ext),
+    denoise: flag("denoise", true),
+    dereverb: flag("dereverb", false),
+    lead: flag("lead_only", false),
+    normalize: flag("normalize", false),
+    background,
+    output_format: outputFormat,
+  };
+
+  const jobId = req.__jobId;
+  createJob(jobId, { stage: "En cola..." });
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  processCleanVoiceJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
 // GET /api/jobs/:id
 // ──────────────────────────────────────────────
 router.get("/jobs/:id", (req, res) => {
@@ -253,7 +296,8 @@ router.get("/download/:id/:filename", (req, res) => {
   // CORS origin is already handled by the cors() middleware in server.js
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
   res.setHeader("Content-Disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`);
-  res.setHeader("Content-Type", "application/octet-stream");
+  // Real media type (sendFile sets it from the extension) so the in-page
+  // player can stream it; "attachment" above still makes links download.
   res.sendFile(path.resolve(filePath));
 });
 
@@ -342,7 +386,7 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const style = req.body.style || "pop";
@@ -398,7 +442,7 @@ router.post("/subtitles/transcribe", attachJobId, upload.single("file"), async (
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const jobId = req.__jobId;

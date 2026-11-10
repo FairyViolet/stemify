@@ -14,6 +14,10 @@ Two engines:
                mode RoFormer extracts the vocals, then Demucs splits the
                instrumental into drums / bass / other.
 
+Task "clean_voice" (--task clean_voice): chains RoFormer models — vocals,
+then optionally denoise, dereverb and lead-vocal-only — and writes the
+clean voice plus everything removed (mix − voice).
+
 Volume: both libraries change the level of their output by default — the
 Demucs CLI rescales any stem peaking above 0 dBFS and audio-separator
 normalises every stem (and the input) to a 0.9 peak. Here all of that is
@@ -138,35 +142,51 @@ def run_demucs(mix, model_name, shifts, overlap, device, start, end):
 # ──────────────────────────────────────────────
 # RoFormer (audio-separator)
 # ──────────────────────────────────────────────
-def run_roformer(input_wav, model_filename, model_dir, device, start, end):
-    """Returns {"vocals": tensor, "no_vocals": tensor}, both [2, samples]."""
+_SEPARATOR_PATCHED = False
+
+
+def _patch_audio_separator():
+    """
+    Make audio-separator keep the exact level and hand us float arrays:
+      1) no peak normalisation of the input or of any stem;
+      2) separated arrays are captured in memory instead of being written by
+         the library (it would convert them to integer PCM).
+    """
+    global _SEPARATOR_PATCHED
     try:
-        from audio_separator.separator import Separator
         from audio_separator.separator import common_separator
-        from audio_separator.separator.architectures import mdxc_separator
         from audio_separator.separator.uvr_lib_v5 import spec_utils
     except ImportError:
         raise RuntimeError(
             "RoFormer no está instalado. Ejecuta instalar_ia.bat en la carpeta de Stemify."
         )
-
-    # 1) No peak normalisation of the input or of any stem (keeps the level).
+    if _SEPARATOR_PATCHED:
+        return
     spec_utils.normalize = lambda wave, max_peak=1.0, min_peak=None: np.asarray(wave)
 
-    # 2) Keep the separated arrays in memory instead of letting the library
-    #    write them (it would convert to 16/32-bit integer PCM).
-    captured = {}
-
     def capture(self, stem_path, source, stem_name):
-        captured[stem_name] = np.array(source, dtype=np.float32)
+        self._stemify_captured[stem_name] = np.array(source, dtype=np.float32)
         return {stem_name: source}
 
     common_separator.CommonSeparator.final_process = capture
+    _SEPARATOR_PATCHED = True
 
-    # 3) Report progress through our JSON protocol.
-    mdxc_separator.tqdm = progress_tqdm(start, end, 1, f"Separando voz con RoFormer ({device_label(device)})")
 
-    emit({"progress": start, "stage": "Cargando modelo RoFormer"})
+def run_audio_separator(input_wav, model_filename, model_dir, device, start, end, stage):
+    """
+    Run one audio-separator model on a float WAV.
+    Returns {stem name (lower case): [2, samples] tensor}.
+    """
+    _patch_audio_separator()
+    from audio_separator.separator import Separator
+    from audio_separator.separator.architectures import mdxc_separator
+    from audio_separator.separator import common_separator
+
+    captured = {}
+    common_separator.CommonSeparator._stemify_captured = captured
+    mdxc_separator.tqdm = progress_tqdm(start, end, 1, f"{stage} ({device_label(device)})")
+
+    emit({"progress": start, "stage": f"Cargando modelo: {stage}"})
     with tempfile.TemporaryDirectory() as tmp:
         separator = Separator(
             log_level=40,  # logging.ERROR — keep stdout clean for our JSON
@@ -179,15 +199,95 @@ def run_roformer(input_wav, model_filename, model_dir, device, start, end):
         separator.load_model(model_filename=model_filename)
         separator.separate(input_wav)
 
-    vocals = next((v for k, v in captured.items() if k.lower() == "vocals"), None)
-    other = next((v for k, v in captured.items() if k.lower() != "vocals"), None)
-    if vocals is None or other is None:
-        raise RuntimeError(f"RoFormer devolvió pistas inesperadas: {list(captured)}")
+    if len(captured) < 2:
+        raise RuntimeError(f"El modelo {model_filename} devolvió pistas inesperadas: {list(captured)}")
     # Arrays come as [samples, channels]
-    return {
-        "vocals": torch.from_numpy(vocals.T.copy()),
-        "no_vocals": torch.from_numpy(other.T.copy()),
-    }
+    return {k.lower(): torch.from_numpy(v.T.copy()) for k, v in captured.items()}
+
+
+def run_roformer(input_wav, model_filename, model_dir, device, start, end):
+    """Returns {"vocals": tensor, "no_vocals": tensor}, both [2, samples]."""
+    stems = run_audio_separator(input_wav, model_filename, model_dir, device, start, end,
+                                "Separando voz con RoFormer")
+    vocals = pick_stem(stems, "vocals")
+    other = next(v for k, v in stems.items() if v is not vocals)
+    return {"vocals": vocals, "no_vocals": other}
+
+
+# ── Voice cleanup (video/audio → main voice only) ─────────────
+CLEAN_MODELS = {
+    "vocals":   ("model_bs_roformer_ep_317_sdr_12.9755.ckpt", "Separando la voz de la música y el ruido"),
+    "denoise":  ("denoise_mel_band_roformer_aufr33_sdr_27.9959.ckpt", "Reduciendo ruido"),
+    "dereverb": ("dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt", "Quitando eco y reverberación"),
+    "lead":     ("mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt", "Aislando la voz principal"),
+}
+
+
+def pick_stem(stems, kind):
+    """Choose the stem to KEEP from a model's two outputs, by its name."""
+    names = list(stems)
+
+    def first(pred):
+        return next((n for n in names if pred(n)), None)
+
+    if kind in ("vocals", "lead"):
+        name = first(lambda n: "vocal" in n and not n.startswith("no") and "instrument" not in n
+                     and "back" not in n and "karaoke" not in n)
+    elif kind == "denoise":
+        name = first(lambda n: "noise" not in n) or first(lambda n: n.startswith("no"))
+    elif kind == "dereverb":
+        name = (first(lambda n: "noreverb" in n.replace(" ", "").replace("_", "") or "dry" in n)
+                or first(lambda n: "reverb" not in n and "echo" not in n))
+    else:
+        name = None
+    if name is None:
+        raise RuntimeError(f"No se reconoció qué pista conservar ({kind}): {names}")
+    return stems[name]
+
+
+def clean_voice(args):
+    """
+    Chain of RoFormer models: vocals → (denoise) → (dereverb) → (lead only).
+    Writes the clean voice, everything that was removed (mix − voice), and,
+    when --background > 0, the voice with a little of the background mixed in.
+    """
+    device = pick_device()
+    emit({"progress": 1, "stage": f"Preparando ({device_label(device)})"})
+    mix = load_audio(args.input)
+
+    steps = ["vocals"] + [k for k in ("denoise", "dereverb", "lead") if getattr(args, k)]
+    voice = mix
+    with tempfile.TemporaryDirectory() as tmp:
+        for n, kind in enumerate(steps):
+            path = os.path.join(tmp, f"step{n}.wav")
+            sf.write(path, voice.numpy().T, SAMPLERATE, subtype="FLOAT")
+            model, stage = CLEAN_MODELS[kind]
+            lo = 5 + 90 * n / len(steps)
+            hi = 5 + 90 * (n + 1) / len(steps)
+            stems = run_audio_separator(path, model, args.model_dir, device, int(lo), int(hi), stage)
+            voice = pick_stem(stems, kind)
+
+    n = min(voice.shape[1], mix.shape[1])
+    voice, mix = voice[:, :n], mix[:, :n]
+    background = mix - voice  # exactly what was removed: voice + background = original
+
+    emit({"progress": 96, "stage": "Guardando pistas"})
+    os.makedirs(args.output_dir, exist_ok=True)
+    track = os.path.splitext(os.path.basename(args.input))[0]
+    out = {}
+
+    def save(role, name, wav):
+        path = os.path.abspath(os.path.join(args.output_dir, f"{track}_{name}.wav"))
+        sf.write(path, wav.numpy().T, SAMPLERATE, subtype="FLOAT")
+        out[role] = path
+
+    save("voice", "voz_limpia", voice)
+    save("background", "fondo_eliminado", background)
+    level = max(0.0, min(1.0, args.background / 100))
+    if level > 0:
+        save("mix", "audio_limpio", voice + background * level)
+
+    emit({"done": True, "files": out, "steps": steps, "device": device_label(device)})
 
 
 # ──────────────────────────────────────────────
@@ -246,9 +346,18 @@ def main():
     parser.add_argument("--shifts", type=int, default=1)
     parser.add_argument("--overlap", type=float, default=0.25)
     parser.add_argument("--two_stems", default=None)
+    # --task clean_voice: keep only the main voice (see clean_voice)
+    parser.add_argument("--task", choices=["separate", "clean_voice"], default="separate")
+    parser.add_argument("--denoise", action="store_true")
+    parser.add_argument("--dereverb", action="store_true")
+    parser.add_argument("--lead", action="store_true", help="Remove backing vocals / other voices")
+    parser.add_argument("--background", type=float, default=0, help="% of the removed background to keep")
     args = parser.parse_args()
     try:
-        separate(args)
+        if args.task == "clean_voice":
+            clean_voice(args)
+        else:
+            separate(args)
     except Exception as exc:  # report every failure to Node as JSON
         emit({"error": f"{type(exc).__name__}: {exc}"})
         sys.exit(1)

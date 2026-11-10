@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Upload, FileAudio, FileVideo, X, Music, Film, Mic, Captions, ArrowRightLeft } from "lucide-react";
+import { Upload, FileAudio, FileVideo, X, Music, Film, Mic, Captions, ArrowRightLeft, AudioLines } from "lucide-react";
 import type { AppMode } from "@/types";
 import { formatBytes, clsx } from "@/lib/utils";
 
@@ -12,10 +12,13 @@ interface Props {
 }
 
 const AUDIO_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.aiff,.aif";
-const VIDEO_ACCEPT = ".mp4,.mov,.mkv,.webm,.avi";
+const VIDEO_ACCEPT = ".mp4,.mov,.mkv,.webm,.avi,.m4v,.3gp,.flv,.wmv,.ts,.mts,.m2ts,.mpg,.mpeg,.ogv";
 const BOTH_ACCEPT = `${AUDIO_ACCEPT},${VIDEO_ACCEPT}`;
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".3gp", ".flv", ".wmv",
+  ".ts", ".mts", ".m2ts", ".mpg", ".mpeg", ".ogv",
+]);
 const BOTH_EXTENSIONS = new Set([...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS]);
 
 type Scheme = {
@@ -34,11 +37,11 @@ function getExt(name: string) {
 
 const SCHEMES: Record<AppMode, Scheme> = {
   music: {
-    allowed: AUDIO_EXTENSIONS,
-    accept: AUDIO_ACCEPT,
-    formats: ["MP3", "WAV", "M4A", "AAC", "FLAC", "OGG"],
+    allowed: BOTH_EXTENSIONS,
+    accept: BOTH_ACCEPT,
+    formats: ["MP3", "WAV", "FLAC", "M4A", "MP4", "MOV"],
     dropIcon: <Music className="w-7 h-7" />,
-    label: "Arrastra tu archivo de audio",
+    label: "Arrastra tu audio (o un vídeo)",
     color: "violet",
   },
   video: {
@@ -72,6 +75,14 @@ const SCHEMES: Record<AppMode, Scheme> = {
     dropIcon: <ArrowRightLeft className="w-7 h-7" />,
     label: "Arrastra el audio (o vídeo) a convertir",
     color: "rose",
+  },
+  clean: {
+    allowed: BOTH_EXTENSIONS,
+    accept: BOTH_ACCEPT,
+    formats: ["MP4", "MOV", "MKV", "WEBM", "MP3", "WAV"],
+    dropIcon: <AudioLines className="w-7 h-7" />,
+    label: "Arrastra el vídeo (o audio) a limpiar",
+    color: "sky",
   },
 };
 
@@ -120,6 +131,14 @@ const COLOR_CLASSES: Record<string, {
     borderIdle12: "hover:border-rose-500/50", bgIdleHover5: "hover:bg-rose-500/5",
     bgGlow: "bg-rose-500", radial: "rgba(244,63,94,0.06)",
     pillBorder: "border-rose-500/25", pillText: "text-rose-300/60", pillBg: "bg-rose-500/8",
+  },
+  sky: {
+    border40: "border-sky-500/40", bg8: "bg-sky-500/8", bg20: "bg-sky-500/20",
+    text400: "text-sky-400", bg500: "bg-sky-500", text300_60: "text-sky-300/60",
+    borderHover50: "border-sky-400/50", bgHover12: "bg-sky-500/12",
+    borderIdle12: "hover:border-sky-500/50", bgIdleHover5: "hover:bg-sky-500/5",
+    bgGlow: "bg-sky-500", radial: "rgba(14,165,233,0.06)",
+    pillBorder: "border-sky-500/25", pillText: "text-sky-300/60", pillBg: "bg-sky-500/8",
   },
 };
 

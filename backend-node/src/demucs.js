@@ -145,20 +145,8 @@ const WORKER_SCRIPT = path.resolve(__dirname, "..", "..", "backend", "separation
  * @param {"standard"|"high"} quality - see QUALITY_PRESETS
  */
 async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAULT_QUALITY) {
-  const python = findDemucsPython();
-  if (!python) {
-    throw new Error(
-      "No se encontró un entorno Python con Demucs instalado correctamente. " +
-      "Ejecuta: pip install demucs soundfile torch torchaudio"
-    );
-  }
-  if (!fs.existsSync(WORKER_SCRIPT)) {
-    throw new Error(`Worker script no encontrado: ${WORKER_SCRIPT}`);
-  }
-
   const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS[DEFAULT_QUALITY];
   const args = [
-    WORKER_SCRIPT,
     "--input", audioPath,
     "--output_dir", outputDir,
     "--engine", preset.engine,
@@ -170,7 +158,53 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
   ];
   if (mode === "2stem") args.push("--two_stems", "vocals");
 
-  console.log(`[demucs] running: ${python} ${args.join(" ")}`);
+  const result = await runSeparationWorker(args, onProgress, "Demucs");
+  console.log(`[demucs] ${preset.engine} done on ${result.device}: ${result.files.length} pistas`);
+  return result.files;
+}
+
+/**
+ * Voice cleanup: keep only the main voice of an audio file (RoFormer chain,
+ * see clean_voice in separation_worker.py).
+ *
+ * @param {{ denoise?: boolean, dereverb?: boolean, lead?: boolean, background?: number }} options
+ * @returns {Promise<{ voice: string, background: string, mix?: string }>} absolute WAV paths
+ */
+async function runVoiceClean(audioPath, outputDir, options, onProgress) {
+  const args = [
+    "--task", "clean_voice",
+    "--input", audioPath,
+    "--output_dir", outputDir,
+    "--model_dir", MODELS_DIR,
+    "--background", String(options.background || 0),
+  ];
+  if (options.denoise) args.push("--denoise");
+  if (options.dereverb) args.push("--dereverb");
+  if (options.lead) args.push("--lead");
+
+  const result = await runSeparationWorker(args, onProgress, "La limpieza de voz");
+  console.log(`[voice] done on ${result.device}: ${result.steps.join(" → ")}`);
+  return result.files;
+}
+
+/**
+ * Spawn backend/separation_worker.py and follow its JSON-line protocol.
+ * Resolves with the final {"done": true, ...} message.
+ */
+function runSeparationWorker(workerArgs, onProgress, what) {
+  const python = findDemucsPython();
+  if (!python) {
+    return Promise.reject(new Error(
+      "No se encontró un entorno Python con Demucs instalado correctamente. " +
+      "Ejecuta instalar_ia.bat en la carpeta de Stemify."
+    ));
+  }
+  if (!fs.existsSync(WORKER_SCRIPT)) {
+    return Promise.reject(new Error(`Worker script no encontrado: ${WORKER_SCRIPT}`));
+  }
+
+  const args = [WORKER_SCRIPT, ...workerArgs];
+  console.log(`[separation] running: ${python} ${args.join(" ")}`);
   const isAbsolute = python.includes("\\") || python.includes("/");
 
   return new Promise((resolve, reject) => {
@@ -211,16 +245,15 @@ async function runDemucs(audioPath, outputDir, mode, onProgress, quality = DEFAU
     });
 
     proc.on("close", (code) => {
-      if (workerError) return reject(new Error(`Demucs falló: ${workerError}`));
+      if (workerError) return reject(new Error(`${what} falló: ${workerError}`));
       if (code !== 0 || !result) {
-        return reject(new Error(`Demucs falló (código ${code}): ${stderr.slice(-1000)}`));
+        return reject(new Error(`${what} falló (código ${code}): ${stderr.slice(-1000)}`));
       }
-      console.log(`[demucs] ${preset.engine} done on ${result.device}: ${result.files.length} pistas`);
-      resolve(result.files);
+      resolve(result);
     });
 
     proc.on("error", (err) => {
-      reject(new Error(`No se pudo ejecutar Demucs: ${err.message}`));
+      reject(new Error(`No se pudo ejecutar ${what}: ${err.message}`));
     });
   });
 }
@@ -246,4 +279,4 @@ function extractStemSuffix(demucsFilename, trackBaseName) {
   return base;
 }
 
-module.exports = { QUALITY_PRESETS, DEFAULT_QUALITY, checkDemucs, getAiInfo, runDemucs, stemLabel, extractStemSuffix };
+module.exports = { QUALITY_PRESETS, DEFAULT_QUALITY, checkDemucs, getAiInfo, runDemucs, runVoiceClean, stemLabel, extractStemSuffix };

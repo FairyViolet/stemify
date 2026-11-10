@@ -11,13 +11,14 @@ import { DownloadSection } from "@/components/DownloadSection";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { LegalNotice } from "@/components/LegalNotice";
 import { BackendStatusBanner } from "@/components/BackendStatusBanner";
-import { submitMusicJob, submitVideoJob, submitConvertJob, fetchJob, deleteJob } from "@/lib/api";
+import { submitMusicJob, submitVideoJob, submitConvertJob, submitCleanVoiceJob, fetchJob, deleteJob } from "@/lib/api";
+import { CleanVoiceOptions } from "@/components/CleanVoiceOptions";
 import { AudioFormatPicker } from "@/components/AudioFormatPicker";
 import { AUDIO_FORMAT_OPTIONS } from "@/lib/audioFormats";
 import { useBackendStatus } from "@/lib/useBackendStatus";
 import { SpeechToText } from "@/components/SpeechToText";
 import { DynamicSubtitles } from "@/components/DynamicSubtitles";
-import type { AppMode, AudioFormat, MusicMode, SeparationQuality, Job, VideoOptions } from "@/types";
+import type { AppMode, AudioFormat, CleanVoiceOptions as CleanOptions, MusicMode, SeparationQuality, Job, VideoOptions } from "@/types";
 
 const DEFAULT_VIDEO_OPTIONS: VideoOptions = {
   extract_full_audio: true,
@@ -51,7 +52,18 @@ const SUBMIT_LABEL: Partial<Record<AppMode, string>> = {
   music: "Separar Audio",
   video: "Procesar Vídeo",
   convert: "Convertir Audio",
+  clean: "Limpiar Voz",
 };
+
+const DEFAULT_CLEAN_OPTIONS: CleanOptions = {
+  denoise: true,
+  dereverb: false,
+  lead_only: false,
+  background: 0,
+  normalize: false,
+};
+
+const VIDEO_EXT = /\.(mp4|mov|mkv|webm|avi|m4v|3gp|flv|wmv|ts|mts|m2ts|mpg|mpeg|ogv)$/i;
 
 export default function HomePage() {
   const [appMode, setAppMode] = useState<AppMode | null>(null);
@@ -62,6 +74,7 @@ export default function HomePage() {
   const [videoOptions, setVideoOptions] = useState<VideoOptions>(DEFAULT_VIDEO_OPTIONS);
   const [stemFormat, setStemFormat] = useRememberedFormat("stemify.stemFormat", "wav32");
   const [convertFormat, setConvertFormat] = useRememberedFormat("stemify.convertFormat", "mp3_320");
+  const [cleanOptions, setCleanOptions] = useState<CleanOptions>(DEFAULT_CLEAN_OPTIONS);
   const [uiState, setUiState] = useState<UIState>("idle");
   const [job, setJob] = useState<Job | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -122,7 +135,8 @@ export default function HomePage() {
     uiState === "idle" &&
     backendReachable &&
     ffmpegOk &&
-    (appMode === "music" || appMode === "convert" || Object.values(videoOptions).some(Boolean)) &&
+    (appMode === "music" || appMode === "convert" || appMode === "clean" || Object.values(videoOptions).some(Boolean)) &&
+    (appMode !== "clean" || roformerOk) &&
     (!needsDemucs || demucsOk);
 
   const handleSubmit = async () => {
@@ -137,6 +151,8 @@ export default function HomePage() {
         result = await submitMusicJob(file, musicMode, effectiveQuality, stemFormat);
       } else if (appMode === "convert") {
         result = await submitConvertJob(file, convertFormat);
+      } else if (appMode === "clean") {
+        result = await submitCleanVoiceJob(file, cleanOptions, stemFormat);
       } else {
         result = await submitVideoJob(file, videoOptions, stemFormat);
       }
@@ -273,6 +289,9 @@ export default function HomePage() {
                 {appMode === "video" && (
                   <VideoSeparationOptions options={videoOptions} onChange={setVideoOptions} />
                 )}
+                {appMode === "clean" && (
+                  <CleanVoiceOptions options={cleanOptions} onChange={setCleanOptions} isVideo={VIDEO_EXT.test(file.name)} />
+                )}
 
                 {appMode === "convert" ? (
                   <AudioFormatPicker
@@ -281,7 +300,7 @@ export default function HomePage() {
                     onChange={setConvertFormat}
                     note="Se mantienen el volumen y los datos de la canción (título, artista). La carátula no se copia."
                   />
-                ) : (appMode === "music" || videoOptions.extract_full_audio
+                ) : (appMode === "music" || appMode === "clean" || videoOptions.extract_full_audio
                     || videoOptions.separate_voice_music || videoOptions.separate_music_stems) && (
                   <AudioFormatPicker
                     title="Formato de descarga"
@@ -331,6 +350,11 @@ export default function HomePage() {
                       <span>🤖</span> Esta opción requiere Demucs — instala Python + pip install demucs
                     </p>
                   )}
+                  {backendReachable && appMode === "clean" && !roformerOk && (
+                    <p className="text-center text-sky-300/70 text-[11px]">
+                      🤖 Limpiar voz necesita RoFormer: ejecuta instalar_ia.bat en la carpeta de Stemify
+                    </p>
+                  )}
                   {canSubmit && (
                     <p className="text-center text-white/25 text-[11px]">
                       Solo procesa archivos que poseas o tengas permiso de usar.
@@ -362,7 +386,7 @@ export default function HomePage() {
           <DownloadSection
             job={job}
             onReset={handleReset}
-            title={appMode === "convert" ? "Archivo convertido" : "Pistas separadas"}
+            title={appMode === "convert" ? "Archivo convertido" : appMode === "clean" ? "Resultado" : "Pistas separadas"}
           />
         )}
 

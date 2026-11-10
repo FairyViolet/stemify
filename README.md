@@ -62,7 +62,7 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
 
 ## Qué hace cada modo
 
-### Music Mode (MP3, WAV, M4A, AAC, FLAC, OGG)
+### Music Mode (audio o vídeo: MP3, WAV, FLAC, M4A, MP4, MOV, MKV…)
 - **2 pistas**: Vocals + Instrumental
 - **4 pistas**: Vocals + Drums + Bass + Other Instruments
 - **Motor / calidad**:
@@ -73,6 +73,12 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
   Siempre con **el mismo volumen que el original**. En WAV 32-bit es exacto:
   sumadas, las pistas reconstruyen la canción. En los demás formatos, si algún
   pico pasa del máximo se suaviza en vez de distorsionar.
+
+### Limpiar Voz (vídeo o audio)
+- Quita **música y ruido de fondo** y deja la voz (BS-RoFormer).
+- Opcional: **reducir ruido extra**, **quitar eco/reverberación** y dejar **solo la voz principal** (sin coros ni voces de fondo).
+- Puedes **dejar un poco del fondo** (0–30%) para que no suene artificial e **igualar el volumen** al estándar de redes (−14 LUFS).
+- Si subes un vídeo, recibes el **vídeo con el audio limpio** (MP4), la voz sola y lo que se quitó.
 
 ### Subtítulos Dinámicos (vídeo)
 - **8 plantillas**: Pop TikTok, Caja, Karaoke, Neón, Palabra a palabra, Una palabra, Limpio y Clásico.
@@ -88,7 +94,7 @@ Para cerrar la app: cierra las dos ventanas de consola que se abren minimizadas.
 - Convierte a WAV, FLAC, MP3, M4A, OGG u Opus. Si subes un vídeo, extrae y convierte su audio.
 - Conserva el volumen y los datos (título, artista); no copia la carátula.
 
-### Video Mode (MP4, MOV, MKV, WEBM, AVI)
+### Video Mode (MP4, MOV, MKV, WEBM, AVI, M4V, 3GP, FLV, WMV, TS, MPG…)
 - **Extraer audio completo** → WAV
 - **Video sin audio** → MP4 mudo
 - **Separar voces/música** → usa IA (requiere Demucs)

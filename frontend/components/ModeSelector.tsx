@@ -1,6 +1,6 @@
 "use client";
 
-import { Music2, Video, Mic, Captions, Check, ArrowRightLeft } from "lucide-react";
+import { Music2, Video, Mic, Captions, Check, ArrowRightLeft, AudioLines } from "lucide-react";
 import type { AppMode } from "@/types";
 import { clsx } from "@/lib/utils";
 
@@ -72,6 +72,19 @@ function KaraokeWords() {
       <text x="22" y="17" fontSize="13" fontWeight="800" fill="#fbbf24">IS</text>
       <text x="38" y="17" fontSize="10" fontWeight="700" fill="#ffffff" opacity="0.6">so</text>
       <text x="54" y="17" fontSize="10" fontWeight="700" fill="#ffffff" opacity="0.6">cool</text>
+    </svg>
+  );
+}
+
+/* Mini "noisy → clean" waveform decoration */
+function CleanWave() {
+  const noisy = [0.5, 0.9, 0.3, 0.8, 0.6, 1, 0.4, 0.7];
+  const clean = [0.2, 0.5, 0.8, 0.5, 0.2, 0.6, 0.9, 0.4];
+  return (
+    <svg viewBox="0 0 90 24" className="w-full h-6 opacity-70">
+      {noisy.map((h, i) => <rect key={`n${i}`} x={i * 5} y={(1 - h) * 24} width={3} height={h * 24} rx={1.5} fill="#64748b" />)}
+      <text x="45" y="16" fontSize="10" fontWeight="700" fill="#38bdf8" textAnchor="middle">→</text>
+      {clean.map((h, i) => <rect key={`c${i}`} x={52 + i * 5} y={(1 - h) * 24} width={3} height={h * 24} rx={1.5} fill="#38bdf8" />)}
     </svg>
   );
 }
@@ -153,6 +166,22 @@ const modes = [
     iconColor: "text-amber-300",
     tagBg: "bg-amber-500/15 text-amber-300",
     checkBg: "bg-amber-500",
+  },
+  {
+    id: "clean" as AppMode,
+    icon: <AudioLines className="w-7 h-7" />,
+    title: "Limpiar Voz",
+    subtitle: "Quita música, ruido y eco de un video o audio y deja la voz principal.",
+    tags: ["Sin música", "Sin ruido", "Sin eco", "Video limpio"],
+    decoration: <CleanWave />,
+    activeGlow: "shadow-[0_0_40px_rgba(14,165,233,0.25)]",
+    activeBorder: "border-sky-500/70",
+    activeBg: "from-sky-900/40 to-cyan-900/20",
+    idleBg: "from-sky-900/10 to-cyan-900/5",
+    iconBg: "bg-sky-500/20",
+    iconColor: "text-sky-300",
+    tagBg: "bg-sky-500/15 text-sky-300",
+    checkBg: "bg-sky-500",
   },
   {
     id: "convert" as AppMode,

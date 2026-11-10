@@ -8,7 +8,9 @@ export function formatBytes(bytes: number): string {
 
 export function stemIcon(label: string): string {
   const lower = label.toLowerCase();
-  if (lower.includes("vocal") || lower.includes("voice") || lower.includes("dialogue")) return "🎤";
+  if (lower.includes("video con")) return "🎬";
+  if (lower.includes("vocal") || lower.includes("voice") || lower.includes("dialogue") || lower.includes("voz")) return "🎤";
+  if (lower.includes("fondo eliminado")) return "🗑️";
   if (lower.includes("drum")) return "🥁";
   if (lower.includes("bass")) return "🎸";
   if (lower.includes("instrumental") || lower.includes("background") || lower.includes("music")) return "🎵";

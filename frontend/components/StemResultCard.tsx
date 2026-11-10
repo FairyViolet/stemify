@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, FileVideo, Loader2 } from "lucide-react";
+import { Download, FileVideo, Loader2, Play, X } from "lucide-react";
 import type { JobFile } from "@/types";
 import { formatBytes, stemIcon, clsx } from "@/lib/utils";
 import { getDownloadUrl } from "@/lib/api";
@@ -14,13 +14,15 @@ interface Props {
 
 function stemColors(label: string): { bg: string; border: string; text: string; btn: string } {
   const l = label.toLowerCase();
-  if (l.includes("vocal") || l.includes("voice") || l.includes("dialogue"))
+  if (l.includes("video con"))
+    return { bg: "bg-sky-500/10", border: "border-sky-500/25", text: "text-sky-300", btn: "bg-sky-600 hover:bg-sky-500" };
+  if (l.includes("vocal") || l.includes("voice") || l.includes("dialogue") || l.includes("voz"))
     return { bg: "bg-pink-500/10", border: "border-pink-500/25", text: "text-pink-300", btn: "bg-pink-600 hover:bg-pink-500" };
   if (l.includes("drum"))
     return { bg: "bg-orange-500/10", border: "border-orange-500/25", text: "text-orange-300", btn: "bg-orange-600 hover:bg-orange-500" };
   if (l.includes("bass"))
     return { bg: "bg-blue-500/10", border: "border-blue-500/25", text: "text-blue-300", btn: "bg-blue-600 hover:bg-blue-500" };
-  if (l.includes("instrumental") || l.includes("background") || l.includes("other"))
+  if (l.includes("instrumental") || l.includes("background") || l.includes("other") || l.includes("fondo"))
     return { bg: "bg-emerald-500/10", border: "border-emerald-500/25", text: "text-emerald-300", btn: "bg-emerald-600 hover:bg-emerald-500" };
   if (l.includes("muted") || l.includes("no-audio") || l.includes("no audio"))
     return { bg: "bg-slate-500/10", border: "border-slate-500/25", text: "text-slate-300", btn: "bg-slate-600 hover:bg-slate-500" };
@@ -48,8 +50,8 @@ export function StemResultCard({ jobId, file, index }: Props) {
   const icon = stemIcon(file.label);
   const url = getDownloadUrl(jobId, file.filename);
   const colors = stemColors(file.label);
-  const isVideo = file.filename.endsWith(".mp4") || file.filename.endsWith(".mov") ||
-                  file.filename.endsWith(".mkv") || file.filename.endsWith(".webm");
+  const isVideo = /\.(mp4|mov|mkv|webm|m4v|avi|wmv|flv|3gp|ts|mts|m2ts|mpg|mpeg|ogv)$/i.test(file.filename);
+  const [showPlayer, setShowPlayer] = useState(false);
   const ext = file.filename.split(".").pop()?.toUpperCase() ?? "WAV";
 
   async function handleDownload(e: React.MouseEvent) {
@@ -80,6 +82,7 @@ export function StemResultCard({ jobId, file, index }: Props) {
   }
 
   return (
+    <div className="space-y-1.5">
     <div
       className={clsx(
         "group flex items-center gap-4 rounded-xl border px-4 py-3.5 transition-all duration-200",
@@ -115,8 +118,15 @@ export function StemResultCard({ jobId, file, index }: Props) {
         }
       </div>
 
-      {/* Download button */}
+      {/* Preview + download buttons */}
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        <button
+          onClick={() => setShowPlayer((v) => !v)}
+          className="flex items-center gap-1 text-[11px] text-white/50 hover:text-white/90 transition-colors"
+        >
+          {showPlayer ? <X className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+          {showPlayer ? "Cerrar" : isVideo ? "Ver" : "Escuchar"}
+        </button>
         <button
           onClick={handleDownload}
           disabled={downloading}
@@ -137,6 +147,12 @@ export function StemResultCard({ jobId, file, index }: Props) {
           <p className="text-red-400 text-[10px] max-w-[140px] text-right leading-tight">{dlError}</p>
         )}
       </div>
+    </div>
+    {showPlayer && (
+      isVideo
+        ? <video src={url} controls autoPlay playsInline className="w-full max-h-[420px] rounded-xl bg-black" />
+        : <audio src={url} controls autoPlay className="w-full" />
+    )}
     </div>
   );
 }
