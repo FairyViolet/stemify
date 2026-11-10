@@ -223,25 +223,33 @@ CLEAN_MODELS = {
 }
 
 
+# Name of the stem to KEEP for each model, as the models report them
+# (checked against the real models: vocals/instrumental, dry/other,
+# noreverb/reverb, vocals/instrumental).
+KEEP_STEM = {
+    "vocals":   ("vocals",),
+    "lead":     ("vocals", "lead vocals", "lead"),
+    "denoise":  ("dry", "no noise", "denoised", "clean"),
+    "dereverb": ("noreverb", "no reverb", "dry", "dereverb"),
+}
+
+
 def pick_stem(stems, kind):
     """Choose the stem to KEEP from a model's two outputs, by its name."""
-    names = list(stems)
-
-    def first(pred):
-        return next((n for n in names if pred(n)), None)
-
-    if kind in ("vocals", "lead"):
-        name = first(lambda n: "vocal" in n and not n.startswith("no") and "instrument" not in n
-                     and "back" not in n and "karaoke" not in n)
-    elif kind == "denoise":
-        name = first(lambda n: "noise" not in n) or first(lambda n: n.startswith("no"))
-    elif kind == "dereverb":
-        name = (first(lambda n: "noreverb" in n.replace(" ", "").replace("_", "") or "dry" in n)
-                or first(lambda n: "reverb" not in n and "echo" not in n))
-    else:
-        name = None
+    name = next((n for n in KEEP_STEM[kind] if n in stems), None)
     if name is None:
-        raise RuntimeError(f"No se reconoció qué pista conservar ({kind}): {names}")
+        raise RuntimeError(f"No se reconoció qué pista conservar ({kind}): {list(stems)}")
+
+    # Safety net: the voice is never ~40 dB quieter than what is removed.
+    # If it is, the stems were mislabelled — fail loudly instead of
+    # returning a silent file.
+    def level(x):
+        return 10 * np.log10(float((x ** 2).mean()) + 1e-12)
+    kept = level(stems[name])
+    other = max(level(v) for k, v in stems.items() if k != name)
+    if kind != "lead" and kept < other - 40:
+        raise RuntimeError(f"El modelo '{kind}' devolvió una voz casi en silencio "
+                           f"({kept:.0f} dB frente a {other:.0f} dB). No se guardó el resultado.")
     return stems[name]
 
 
