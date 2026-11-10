@@ -16,8 +16,10 @@ const router = express.Router();
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
-// Stemify runs on the user's own PC, so long videos are fine (default 4 GB).
-const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "4096");
+// Stemify runs on the user's own PC, so long videos are fine. 4 GB is the
+// floor: an old .env copied from the original template (MAX_UPLOAD_MB=500)
+// must not block a normal phone/camera video. A larger value is honoured.
+const MAX_UPLOAD_MB = Math.max(4096, parseInt(process.env.MAX_UPLOAD_MB || "0") || 0);
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
@@ -122,6 +124,7 @@ router.get("/status", (req, res) => {
     demucs: checkDemucs(),
     roformer: ai.roformer,  // audio-separator installed
     gpu: ai.gpu,            // e.g. "NVIDIA GeForce RTX 4060", or null = CPU
+    max_upload_mb: MAX_UPLOAD_MB,
   });
 });
 
@@ -533,3 +536,4 @@ router.use((err, req, res, next) => {
 });
 
 module.exports = router;
+module.exports.MAX_UPLOAD_MB = MAX_UPLOAD_MB;

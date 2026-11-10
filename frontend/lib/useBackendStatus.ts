@@ -7,8 +7,8 @@ import type { BackendStatus } from "@/types";
 export type BackendState =
   | { state: "checking" }
   | { state: "unreachable" }
-  | { state: "partial"; ffmpeg: boolean; demucs: boolean; roformer: boolean; gpu: string | null }   // backend up but missing deps
-  | { state: "ok"; roformer: boolean; gpu: string | null };
+  | { state: "partial"; ffmpeg: boolean; demucs: boolean; roformer: boolean; gpu: string | null; maxUploadMb: number }   // backend up but missing deps
+  | { state: "ok"; roformer: boolean; gpu: string | null; maxUploadMb: number };
 
 export function useBackendStatus(): BackendState {
   const [result, setResult] = useState<BackendState>({ state: "checking" });
@@ -16,7 +16,11 @@ export function useBackendStatus(): BackendState {
   useEffect(() => {
     fetchBackendStatus()
       .then((status) => {
-        const ai = { roformer: Boolean(status.roformer), gpu: status.gpu ?? null };
+        const ai = {
+          roformer: Boolean(status.roformer),
+          gpu: status.gpu ?? null,
+          maxUploadMb: status.max_upload_mb ?? 4096,
+        };
         if (status.ffmpeg && status.demucs) {
           setResult({ state: "ok", ...ai });
         } else {

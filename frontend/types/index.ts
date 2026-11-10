@@ -96,4 +96,5 @@ export interface BackendStatus {
   demucs: boolean;
   roformer?: boolean;    // BS-RoFormer (audio-separator) installed
   gpu?: string | null;   // GPU name used for AI, null = CPU only
+  max_upload_mb?: number;
 }

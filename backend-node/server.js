@@ -41,6 +41,7 @@ startCleanupScheduler();
 app.listen(PORT, () => {
   console.log(`\n🎵 Stemify backend (Node.js) corriendo en http://localhost:${PORT}`);
   console.log(`   FFmpeg: bundled via ffmpeg-static ✓`);
+  console.log(`   Límite de subida: ${routes.MAX_UPLOAD_MB} MB`);
   const { checkDemucs } = require("./src/demucs");
   const demucs = checkDemucs();
   console.log(`   Demucs: ${demucs ? "disponible ✓" : "no disponible (instala Python + pip install demucs)"}`);

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { Upload, FileAudio, FileVideo, X, Music, Film, Mic, Captions, ArrowRightLeft, AudioLines } from "lucide-react";
 import type { AppMode } from "@/types";
 import { formatBytes, clsx } from "@/lib/utils";
+import { useBackendStatus } from "@/lib/useBackendStatus";
 
 interface Props {
   mode: AppMode;
@@ -148,16 +149,18 @@ export function UploadDropzone({ mode, file, onFile }: Props) {
 
   const scheme = SCHEMES[mode];
   const c = COLOR_CLASSES[scheme.color];
+  const backend = useBackendStatus();
 
   const validate = useCallback((f: File): string | null => {
     const ext = getExt(f.name);
     if (!scheme.allowed.has(ext))
       return `Tipo "${ext}" no soportado. Permitidos: ${[...scheme.allowed].join(", ")}`;
-    const maxMb = parseInt(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? "4096");
+    // The backend's limit is the only one that matters (it enforces it)
+    const maxMb = "maxUploadMb" in backend ? backend.maxUploadMb : 4096;
     if (f.size > maxMb * 1024 * 1024)
       return `Archivo demasiado grande. Máximo: ${maxMb} MB.`;
     return null;
-  }, [scheme.allowed]);
+  }, [scheme.allowed, backend]);
 
   const handleFile = useCallback((f: File) => {
     const err = validate(f);
