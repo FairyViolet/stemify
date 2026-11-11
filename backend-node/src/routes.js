@@ -4,10 +4,11 @@ const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 
-const { getJob, updateJob, deleteJob: removeJob, getAllJobs, createJob } = require("./jobs");
+const { getJob, updateJob, deleteJob: removeJob, createJob, isValidJobId } = require("./jobs");
 const { cleanupJobFiles } = require("./cleanup");
-const { processMusicJob, processVideoJob } = require("./processing");
-const { checkDemucs } = require("./demucs");
+const { processMusicJob, processVideoJob, processConvertJob, processCleanVoiceJob } = require("./processing");
+const { AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT } = require("./ffmpeg");
+const { checkDemucs, getAiInfo, QUALITY_PRESETS, DEFAULT_QUALITY } = require("./demucs");
 const { runWhisperTranscription } = require("./transcription");
 const { runBurnSubtitles, runTranscribeOnly, runRenderOnly } = require("./subtitles");
 
@@ -15,14 +16,54 @@ const router = express.Router();
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
-const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_MB || "500") * 1024 * 1024;
+// Stemify runs on the user's own PC, so long videos are fine. 4 GB is the
+// floor: an old .env copied from the original template (MAX_UPLOAD_MB=500)
+// must not block a normal phone/camera video. A larger value is honoured.
+const MAX_UPLOAD_MB = Math.max(4096, parseInt(process.env.MAX_UPLOAD_MB || "0") || 0);
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
-const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
-const ALLOWED_VIDEO = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi"]);
+const ALLOWED_AUDIO = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
+const ALLOWED_VIDEO = new Set([
+  ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".3gp", ".flv", ".wmv",
+  ".ts", ".mts", ".m2ts", ".mpg", ".mpeg", ".ogv",
+]);
 
+// Spaces are replaced too: Python workers are spawned through a shell when
+// "python" is on PATH, and a space would split the file path in two.
 function safeName(name) {
-  return path.basename(name).replace(/[^a-zA-Z0-9._\- ]/g, "_") || "upload";
+  return path.basename(name).replace(/[^a-zA-Z0-9._\-]/g, "_") || "upload";
 }
+
+function parseQuality(value) {
+  const quality = value || DEFAULT_QUALITY;
+  return Object.hasOwn(QUALITY_PRESETS, quality) ? quality : null;
+}
+
+// Subtitle design presets (see backend/subtitle_worker.py PRESETS)
+const SUBTITLE_STYLES = new Set(["pop", "box", "karaoke", "neon", "reveal", "oneword", "clean", "classic"]);
+
+/**
+ * Parse the optional subtitle design overrides (object or JSON string).
+ * The Python worker validates every field; here we only bound the size.
+ * Returns {} when absent, null when invalid.
+ */
+function parseSubtitleConfig(value) {
+  if (value === undefined || value === null || value === "") return {};
+  let cfg = value;
+  if (typeof value === "string") {
+    if (value.length > 4000) return null;
+    try { cfg = JSON.parse(value); } catch { return null; }
+  }
+  if (typeof cfg !== "object" || Array.isArray(cfg)) return null;
+  if (JSON.stringify(cfg).length > 4000) return null;
+  return cfg;
+}
+
+function parseFormat(value) {
+  const format = value || DEFAULT_AUDIO_FORMAT;
+  return Object.hasOwn(AUDIO_FORMATS, format) ? format : null;
+}
+const BAD_FORMAT = `Formato no válido. Usa: ${Object.keys(AUDIO_FORMATS).join(", ")}.`;
 
 function getExt(name) {
   return path.extname(name).toLowerCase();
@@ -57,16 +98,33 @@ const upload = multer({
 // Middleware: attach a fresh jobId before multer processes the body
 function attachJobId(req, res, next) {
   req.__jobId = uuidv4();
+  // If the request is rejected after multer saved the file, drop it right
+  // away instead of leaving it orphaned in uploads/.
+  res.on("finish", () => {
+    if (res.statusCode >= 400) cleanupJobFiles(req.__jobId);
+  });
   next();
 }
+
+// Reject anything that is not a UUID before it reaches a filesystem path.
+function validateJobIdParam(req, res, next, id) {
+  if (!isValidJobId(id)) return res.status(400).json({ detail: "ID de job inválido." });
+  next();
+}
+router.param("id", validateJobIdParam);
+router.param("jobId", validateJobIdParam);
 
 // ──────────────────────────────────────────────
 // GET /api/status
 // ──────────────────────────────────────────────
 router.get("/status", (req, res) => {
+  const ai = getAiInfo();
   res.json({
     ffmpeg: true,           // always true — ffmpeg-static is bundled
     demucs: checkDemucs(),
+    roformer: ai.roformer,  // audio-separator installed
+    gpu: ai.gpu,            // e.g. "NVIDIA GeForce RTX 4060", or null = CPU
+    max_upload_mb: MAX_UPLOAD_MB,
   });
 });
 
@@ -76,8 +134,9 @@ router.get("/status", (req, res) => {
 router.post("/process/music", attachJobId, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
 
+  // Videos are fine too: the separation worker decodes the first audio track.
   const ext = getExt(req.file.originalname);
-  if (!ALLOWED_AUDIO.has(ext)) {
+  if (!ALLOWED_AUDIO.has(ext) && !ALLOWED_VIDEO.has(ext)) {
     return res.status(400).json({ detail: `Tipo no soportado: ${ext}` });
   }
 
@@ -86,17 +145,19 @@ router.post("/process/music", attachJobId, upload.single("file"), async (req, re
     return res.status(400).json({ detail: "El modo debe ser '2stem' o '4stem'." });
   }
 
+  const quality = parseQuality(req.body.quality);
+  if (!quality) return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
+
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "Preparing file", progress: 10 });
+  createJob(jobId, { stage: "Preparing file", progress: 10 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  processMusicJob(jobId, req.file.path, mode, outputDir).catch(() => {});
+  processMusicJob(jobId, req.file.path, mode, outputDir, quality, outputFormat).catch(() => {});
 
   res.json({ job_id: jobId });
 });
@@ -111,7 +172,7 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const options = {
@@ -119,23 +180,88 @@ router.post("/process/video", attachJobId, upload.single("file"), async (req, re
     remove_audio_track:   req.body.remove_audio_track   === "true",
     separate_voice_music: req.body.separate_voice_music === "true",
     separate_music_stems: req.body.separate_music_stems === "true",
+    quality: parseQuality(req.body.quality),
+    output_format: parseFormat(req.body.output_format),
   };
 
-  if (!Object.values(options).some(Boolean)) {
+  if (!options.output_format) {
+    return res.status(400).json({ detail: BAD_FORMAT });
+  }
+
+  if (!options.quality) {
+    return res.status(400).json({ detail: "La calidad debe ser 'roformer', 'high' o 'standard'." });
+  }
+
+  if (![options.extract_full_audio, options.remove_audio_track, options.separate_voice_music, options.separate_music_stems].some(Boolean)) {
     return res.status(400).json({ detail: "Selecciona al menos una opción de procesamiento." });
   }
 
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "Preparing file", progress: 5 });
+  createJob(jobId, { stage: "Preparing file", progress: 5 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
   processVideoJob(jobId, req.file.path, options, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/convert — audio converter (any audio/video → chosen format)
+// ──────────────────────────────────────────────
+router.post("/convert", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
+  const jobId = req.__jobId;
+  createJob(jobId, { stage: "En cola..." });
+
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  processConvertJob(jobId, req.file.path, outputFormat, outputDir).catch(() => {});
+
+  res.json({ job_id: jobId });
+});
+
+// ──────────────────────────────────────────────
+// POST /api/clean-voice — keep only the main voice of a video or audio file
+// ──────────────────────────────────────────────
+router.post("/clean-voice", attachJobId, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ detail: "No se recibió ningún archivo." });
+
+  const ext = getExt(req.file.originalname);
+  if (!ALLOWED_AUDIO.has(ext) && !ALLOWED_VIDEO.has(ext)) {
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}` });
+  }
+  if (!getAiInfo().roformer) {
+    return res.status(400).json({ detail: "La limpieza de voz necesita RoFormer. Ejecuta instalar_ia.bat en la carpeta de Stemify." });
+  }
+
+  const outputFormat = parseFormat(req.body.output_format);
+  if (!outputFormat) return res.status(400).json({ detail: BAD_FORMAT });
+
+  const flag = (name, fallback) => (req.body[name] === undefined ? fallback : req.body[name] === "true");
+  const background = Math.max(0, Math.min(30, Number(req.body.background) || 0));
+  const options = {
+    isVideo: ALLOWED_VIDEO.has(ext),
+    denoise: flag("denoise", true),
+    dereverb: flag("dereverb", false),
+    lead: flag("lead_only", false),
+    normalize: flag("normalize", false),
+    background,
+    output_format: outputFormat,
+  };
+
+  const jobId = req.__jobId;
+  createJob(jobId, { stage: "En cola..." });
+  const outputDir = path.join(OUTPUT_DIR, jobId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  processCleanVoiceJob(jobId, req.file.path, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
 });
@@ -172,11 +298,11 @@ router.get("/download/:id/:filename", (req, res) => {
   const filePath = path.join(OUTPUT_DIR, req.params.id, safe);
   if (!fs.existsSync(filePath)) return res.status(404).json({ detail: "El archivo procesado ya no existe en disco (fue limpiado automáticamente). Volvé a subir el archivo." });
 
-  // Explicit headers for cross-origin download support
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // CORS origin is already handled by the cors() middleware in server.js
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
-  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safe)}"`);
-  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`);
+  // Real media type (sendFile sets it from the extension) so the in-page
+  // player can stream it; "attachment" above still makes links download.
   res.sendFile(path.resolve(filePath));
 });
 
@@ -228,11 +354,7 @@ router.post("/transcribe", attachJobId, upload.single("file"), async (req, res) 
   }
 
   const jobId = req.__jobId;
-  const job = createJob();
-  job.job_id = jobId;
-  getAllJobs().delete(job.job_id);
-  getAllJobs().set(jobId, job);
-  updateJob(jobId, { stage: "En cola...", progress: 0 });
+  createJob(jobId, { stage: "En cola...", progress: 0 });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
@@ -269,12 +391,11 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const style = req.body.style || "pop";
-  const validStyles = new Set(["pop", "clean", "classic"]);
-  if (!validStyles.has(style)) {
+  if (!SUBTITLE_STYLES.has(style)) {
     return res.status(400).json({ detail: `Estilo no válido: ${style}` });
   }
 
@@ -285,15 +406,15 @@ router.post("/subtitles", attachJobId, upload.single("file"), async (req, res) =
   }
 
   const jobId = req.__jobId;
-  getAllJobs().set(jobId, {
-    job_id: jobId, status: "queued", progress: 0,
-    stage: "En cola...", error: null, files: [], created_at: Date.now(),
-  });
+  createJob(jobId, { stage: "En cola..." });
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const options = { style, orientation };
+  const config = parseSubtitleConfig(req.body.config);
+  if (!config) return res.status(400).json({ detail: "Configuración de diseño no válida." });
+
+  const options = { style, orientation, config };
   processSubtitlesJob(jobId, req.file.path, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
@@ -326,14 +447,11 @@ router.post("/subtitles/transcribe", attachJobId, upload.single("file"), async (
 
   const ext = getExt(req.file.originalname);
   if (!ALLOWED_VIDEO.has(ext)) {
-    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM o AVI.` });
+    return res.status(400).json({ detail: `Tipo no soportado: ${ext}. Usa MP4, MOV, MKV, WEBM, AVI u otro formato de video común.` });
   }
 
   const jobId = req.__jobId;
-  getAllJobs().set(jobId, {
-    job_id: jobId, status: "queued", progress: 0,
-    stage: "En cola...", error: null, files: [], segments: null, created_at: Date.now(),
-  });
+  createJob(jobId, { stage: "En cola...", segments: null });
 
   // No outputDir needed yet — the uploaded video stays in uploads/{jobId}/
   // and is reused by /subtitles/render/:jobId below.
@@ -368,6 +486,9 @@ router.post("/subtitles/render/:jobId", (req, res) => {
   const jobId = req.params.jobId;
   const job = getJob(jobId);
   if (!job) return res.status(404).json({ detail: "Job no encontrado. Volvé a subir el video." });
+  if (job.status === "queued" || job.status === "processing") {
+    return res.status(409).json({ detail: "Este video todavía se está procesando. Esperá a que termine." });
+  }
 
   const uploadDir = path.join(UPLOAD_DIR, jobId);
   if (!fs.existsSync(uploadDir)) {
@@ -381,9 +502,8 @@ router.post("/subtitles/render/:jobId", (req, res) => {
 
   const { style, orientation, segments } = req.body || {};
 
-  const validStyles = new Set(["pop", "clean", "classic"]);
   const finalStyle = style || "pop";
-  if (!validStyles.has(finalStyle)) {
+  if (!SUBTITLE_STYLES.has(finalStyle)) {
     return res.status(400).json({ detail: `Estilo no válido: ${finalStyle}` });
   }
 
@@ -398,7 +518,10 @@ router.post("/subtitles/render/:jobId", (req, res) => {
   }
 
   const outputDir = path.join(OUTPUT_DIR, jobId);
-  const options = { style: finalStyle, orientation: finalOrientation };
+  const config = parseSubtitleConfig(req.body?.config);
+  if (!config) return res.status(400).json({ detail: "Configuración de diseño no válida." });
+
+  const options = { style: finalStyle, orientation: finalOrientation, config };
   processRenderJob(jobId, inputPath, segments, options, outputDir).catch(() => {});
 
   res.json({ job_id: jobId });
@@ -407,9 +530,10 @@ router.post("/subtitles/render/:jobId", (req, res) => {
 // Multer error handler
 router.use((err, req, res, next) => {
   if (err.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).json({ detail: `El archivo supera el límite de ${process.env.MAX_UPLOAD_MB || 500} MB.` });
+    return res.status(413).json({ detail: `El archivo supera el límite de ${MAX_UPLOAD_MB} MB.` });
   }
   res.status(400).json({ detail: err.message || "Error de carga." });
 });
 
 module.exports = router;
+module.exports.MAX_UPLOAD_MB = MAX_UPLOAD_MB;

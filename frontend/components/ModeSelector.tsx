@@ -1,6 +1,6 @@
 "use client";
 
-import { Music2, Video, Mic, Captions, Check } from "lucide-react";
+import { Music2, Video, Mic, Captions, Check, ArrowRightLeft, AudioLines } from "lucide-react";
 import type { AppMode } from "@/types";
 import { clsx } from "@/lib/utils";
 
@@ -76,6 +76,32 @@ function KaraokeWords() {
   );
 }
 
+/* Mini "noisy → clean" waveform decoration */
+function CleanWave() {
+  const noisy = [0.5, 0.9, 0.3, 0.8, 0.6, 1, 0.4, 0.7];
+  const clean = [0.2, 0.5, 0.8, 0.5, 0.2, 0.6, 0.9, 0.4];
+  return (
+    <svg viewBox="0 0 90 24" className="w-full h-6 opacity-70">
+      {noisy.map((h, i) => <rect key={`n${i}`} x={i * 5} y={(1 - h) * 24} width={3} height={h * 24} rx={1.5} fill="#64748b" />)}
+      <text x="45" y="16" fontSize="10" fontWeight="700" fill="#38bdf8" textAnchor="middle">→</text>
+      {clean.map((h, i) => <rect key={`c${i}`} x={52 + i * 5} y={(1 - h) * 24} width={3} height={h * 24} rx={1.5} fill="#38bdf8" />)}
+    </svg>
+  );
+}
+
+/* Mini "MP3 → WAV" decoration */
+function FormatSwap() {
+  return (
+    <svg viewBox="0 0 90 24" className="w-full h-6 opacity-70">
+      <rect x="1" y="4" width="26" height="16" rx="4" fill="none" stroke="#fb7185" strokeWidth="1.2" />
+      <text x="14" y="15.5" fontSize="8" fontWeight="700" fill="#fda4af" textAnchor="middle">MP3</text>
+      <text x="45" y="16" fontSize="11" fontWeight="700" fill="#fb7185" textAnchor="middle">→</text>
+      <rect x="63" y="4" width="26" height="16" rx="4" fill="#fb7185" fillOpacity="0.2" stroke="#fb7185" strokeWidth="1.2" />
+      <text x="76" y="15.5" fontSize="8" fontWeight="700" fill="#ffe4e6" textAnchor="middle">WAV</text>
+    </svg>
+  );
+}
+
 const modes = [
   {
     id: "music" as AppMode,
@@ -141,6 +167,38 @@ const modes = [
     tagBg: "bg-amber-500/15 text-amber-300",
     checkBg: "bg-amber-500",
   },
+  {
+    id: "clean" as AppMode,
+    icon: <AudioLines className="w-7 h-7" />,
+    title: "Limpiar Voz",
+    subtitle: "Quita música, ruido y eco de un video o audio y deja la voz principal.",
+    tags: ["Sin música", "Sin ruido", "Sin eco", "Video limpio"],
+    decoration: <CleanWave />,
+    activeGlow: "shadow-[0_0_40px_rgba(14,165,233,0.25)]",
+    activeBorder: "border-sky-500/70",
+    activeBg: "from-sky-900/40 to-cyan-900/20",
+    idleBg: "from-sky-900/10 to-cyan-900/5",
+    iconBg: "bg-sky-500/20",
+    iconColor: "text-sky-300",
+    tagBg: "bg-sky-500/15 text-sky-300",
+    checkBg: "bg-sky-500",
+  },
+  {
+    id: "convert" as AppMode,
+    icon: <ArrowRightLeft className="w-7 h-7" />,
+    title: "Convertidor de Audio",
+    subtitle: "Cambia cualquier audio (o el audio de un video) a otro formato.",
+    tags: ["MP3", "WAV", "FLAC", "M4A", "OGG", "Opus"],
+    decoration: <FormatSwap />,
+    activeGlow: "shadow-[0_0_40px_rgba(244,63,94,0.25)]",
+    activeBorder: "border-rose-500/70",
+    activeBg: "from-rose-900/40 to-pink-900/20",
+    idleBg: "from-rose-900/10 to-pink-900/5",
+    iconBg: "bg-rose-500/20",
+    iconColor: "text-rose-300",
+    tagBg: "bg-rose-500/15 text-rose-300",
+    checkBg: "bg-rose-500",
+  },
 ] as const;
 
 export function ModeSelector({ selected, onChange }: Props) {
@@ -158,6 +216,8 @@ export function ModeSelector({ selected, onChange }: Props) {
               onClick={() => onChange(m.id)}
               className={clsx(
                 "relative group text-left rounded-2xl border p-5 transition-all duration-300 cursor-pointer overflow-hidden",
+                // Odd card out (the 5th) spans the full row
+                modes.length % 2 === 1 && m === modes[modes.length - 1] && "col-span-2",
                 "bg-gradient-to-br",
                 active
                   ? `${m.activeBorder} ${m.activeBg} ${m.activeGlow} scale-[1.02]`

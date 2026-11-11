@@ -3,18 +3,120 @@ const ffprobeInstaller = require("@ffprobe-installer/ffprobe");
 const ffmpeg = require("fluent-ffmpeg");
 const path = require("path");
 const fs = require("fs");
+const { spawn } = require("child_process");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobeInstaller.path);
 
 /**
- * Extract audio from a video file → WAV
+ * Output audio formats offered for downloads (separation and converter).
+ * "wav32" is 32-bit float: the only one that can hold peaks above 0 dBFS,
+ * so separated stems keep their exact level. The rest are standard formats.
+ */
+const AUDIO_FORMATS = {
+  wav32:   { ext: "wav",  label: "WAV 32-bit float", args: ["-c:a", "pcm_f32le"], float: true },
+  wav24:   { ext: "wav",  label: "WAV 24-bit",       args: ["-c:a", "pcm_s24le"] },
+  wav16:   { ext: "wav",  label: "WAV 16-bit",       args: ["-c:a", "pcm_s16le"] },
+  flac:    { ext: "flac", label: "FLAC 24-bit",      args: ["-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24"] },
+  mp3_320: { ext: "mp3",  label: "MP3 320 kbps",     args: ["-c:a", "libmp3lame", "-b:a", "320k"] },
+  mp3_192: { ext: "mp3",  label: "MP3 192 kbps",     args: ["-c:a", "libmp3lame", "-b:a", "192k"] },
+  m4a:     { ext: "m4a",  label: "M4A (AAC 256 kbps)", args: ["-c:a", "aac", "-b:a", "256k"] },
+  ogg:     { ext: "ogg",  label: "OGG Vorbis",       args: ["-c:a", "libvorbis", "-q:a", "6"] },
+  opus:    { ext: "opus", label: "Opus 160 kbps",    args: ["-c:a", "libopus", "-b:a", "160k"] },
+};
+const DEFAULT_AUDIO_FORMAT = "wav32";
+
+// Look-ahead peak limiter that only acts on samples above -0.09 dBFS.
+// Below that it leaves the audio untouched (no auto-level, delay
+// compensated), so stems keep their level; above it, peaks are smoothed
+// instead of hard-clipped (which is what 16/24-bit and lossy formats do).
+const PEAK_GUARD = "alimiter=limit=0.99:attack=1:release=50:level=disabled:latency=1";
+
+/**
+ * Convert the first audio stream of any audio/video file to `formatId`.
+ * Metadata is kept; cover art and video are dropped.
+ *
+ * @param {{ peakGuard?: boolean }} opts - peakGuard: smooth peaks above
+ *   0 dBFS (use for float stems going to a non-float format)
+ */
+function convertAudio(inputPath, outputPath, formatId, opts = {}) {
+  const fmt = AUDIO_FORMATS[formatId];
+  if (!fmt) return Promise.reject(new Error(`Formato no soportado: ${formatId}`));
+  const args = ["-v", "error", "-nostdin", "-y", "-i", inputPath, "-map", "0:a:0", "-vn", "-map_metadata", "0"];
+  if (opts.peakGuard && !fmt.float) args.push("-af", PEAK_GUARD);
+  args.push(...fmt.args, outputPath);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args);
+    let stderr = "";
+    proc.stderr.on("data", (c) => { stderr = (stderr + c).slice(-2000); });
+    proc.on("error", (err) => reject(new Error(`FFmpeg convert: ${err.message}`)));
+    proc.on("close", (code) => {
+      if (code === 0) resolve(outputPath);
+      else reject(new Error(`FFmpeg no pudo convertir el audio: ${stderr.trim().split("\n").pop()}`));
+    });
+  });
+}
+
+function runFfmpeg(args, what, logLevel = "error") {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, ["-v", logLevel, "-nostdin", "-y", ...args]);
+    let stderr = "";
+    proc.stderr.on("data", (c) => { stderr = (stderr + c).slice(-4000); });
+    proc.on("error", (err) => reject(new Error(`FFmpeg ${what}: ${err.message}`)));
+    proc.on("close", (code) => {
+      if (code === 0) resolve(stderr);
+      else reject(new Error(`FFmpeg ${what}: ${stderr.trim().split("\n").pop()}`));
+    });
+  });
+}
+
+/**
+ * Loudness-normalise to the level social platforms use (-14 LUFS, peaks
+ * below -1.5 dBTP). Two passes: measure, then apply one linear gain when
+ * possible (keeps the voice's dynamics). Output: 32-bit float WAV, 44.1 kHz.
+ */
+async function normalizeLoudness(inputPath, outputPath) {
+  const target = "I=-14:TP=-1.5:LRA=11";
+  const log = await runFfmpeg([
+    "-i", inputPath, "-af", `loudnorm=${target}:print_format=json`, "-f", "null", "-",
+  ], "medir volumen", "info");
+  const m = JSON.parse(log.slice(log.lastIndexOf("{"), log.lastIndexOf("}") + 1));
+  const measured = `measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}` +
+    `:measured_thresh=${m.input_thresh}:offset=${m.target_offset}`;
+  await runFfmpeg([
+    "-i", inputPath,
+    "-af", `loudnorm=${target}:${measured}:linear=true`,
+    "-ar", "44100", "-c:a", "pcm_f32le", outputPath,
+  ], "normalizar volumen");
+}
+
+/**
+ * Replace a video's audio with `audioPath` → MP4. The picture is copied as
+ * is when MP4 can hold its codec; otherwise (e.g. WMV, old AVI) it is
+ * re-encoded to H.264.
+ */
+async function replaceVideoAudio(videoPath, audioPath, outputMp4) {
+  const common = ["-i", videoPath, "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0"];
+  const audio = ["-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart"];
+  try {
+    await runFfmpeg([...common, "-c:v", "copy", ...audio, outputMp4], "unir audio y video");
+  } catch {
+    await runFfmpeg([...common, "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+      "-pix_fmt", "yuv420p", ...audio, outputMp4], "unir audio y video");
+  }
+  return outputMp4;
+}
+
+/**
+ * Extract audio from a video file → 32-bit float WAV (no clipping, so it is
+ * also a lossless input for the AI separation).
  */
 function extractAudio(videoPath, outputWav) {
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
       .noVideo()
-      .audioCodec("pcm_s16le")
+      .audioCodec("pcm_f32le")
       .audioFrequency(44100)
       .audioChannels(2)
       .output(outputWav)
@@ -85,4 +187,4 @@ function getDuration(filePath) {
   });
 }
 
-module.exports = { extractAudio, removeAudio, wavToMp3, hasAudioStream, getDuration };
+module.exports = { AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT, convertAudio, normalizeLoudness, replaceVideoAudio, extractAudio, removeAudio, wavToMp3, hasAudioStream, getDuration };

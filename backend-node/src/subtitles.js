@@ -31,7 +31,10 @@ function runWorker(args, onProgress) {
   const isAbsolute = python.includes("\\") || python.includes("/");
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(python, args, {
+    // Through a shell, args are joined with spaces: quote the ones that
+    // contain spaces (e.g. "S:\\Claude code\\...") so they stay whole.
+    const finalArgs = isAbsolute ? args : args.map((a) => (/\s/.test(a) ? `"${a}"` : a));
+    const proc = spawn(python, finalArgs, {
       shell: !isAbsolute,
       env: {
         ...process.env,
@@ -97,9 +100,21 @@ function runWorker(args, onProgress) {
 }
 
 /**
+ * Write the design overrides next to the outputs and return the CLI args
+ * for subtitle_worker.py (empty when there are none).
+ */
+function configArgs(outputDir, config) {
+  if (!config || Object.keys(config).length === 0) return [];
+  fs.mkdirSync(outputDir, { recursive: true });
+  const configPath = path.join(outputDir, "subtitle_design.json");
+  fs.writeFileSync(configPath, JSON.stringify(config), "utf8");
+  return ["--config_json", configPath];
+}
+
+/**
  * Fast path: transcribe a video and burn karaoke-style subtitles in one shot.
  *
- * @param {{ style?: "pop"|"clean"|"classic", orientation?: "auto"|"horizontal"|"vertical", model?: string }} options
+ * @param {{ style?: string, orientation?: "auto"|"horizontal"|"vertical", model?: string, config?: object }} options
  */
 async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
   const style = options.style || "pop";
@@ -114,6 +129,7 @@ async function runBurnSubtitles(inputPath, outputDir, options, onProgress) {
     "--style", style,
     "--orientation", orientation,
     "--model", model,
+    ...configArgs(outputDir, options.config),
   ], onProgress);
 
   return { files: result.files || [] };
@@ -165,6 +181,7 @@ async function runRenderOnly(inputPath, outputDir, segments, options, onProgress
     "--style", style,
     "--orientation", orientation,
     "--segments_json", segmentsPath,
+    ...configArgs(outputDir, options.config),
   ], onProgress);
 
   return { files: result.files || [] };

@@ -42,7 +42,8 @@ function findPython() {
     if (isAbsolute && !fs.existsSync(p)) continue;
     const r = spawnSync(
       p,
-      ["-c", "import torch, whisper"],
+      // Quoted when it goes through a shell, or the space splits the code in two
+      ["-c", isAbsolute ? "import torch, whisper" : '"import torch, whisper"'],
       { encoding: "utf8", timeout: 15000, shell: !isAbsolute }
     );
     if (r.status === 0) {
@@ -93,7 +94,9 @@ async function runWhisperTranscription(inputPath, outputDir, options, onProgress
   const isAbsolute = python.includes("\\") || python.includes("/");
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(python, args, {
+    // Through a shell, args are joined with spaces: quote the ones with spaces
+    const finalArgs = isAbsolute ? args : args.map((a) => (/\s/.test(a) ? `"${a}"` : a));
+    const proc = spawn(python, finalArgs, {
       shell: !isAbsolute,
       env: {
         ...process.env,

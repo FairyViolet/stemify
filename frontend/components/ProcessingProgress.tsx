@@ -17,10 +17,10 @@ const STEPS = [
 
 function getStepIndex(stage: string): number {
   const s = stage.toLowerCase();
-  if (s.includes("upload") || s.includes("starting") || s.includes("queued") || s.includes("preparing")) return 0;
-  if (s.includes("validat") || s.includes("extract")) return 1;
-  if (s.includes("ai") || s.includes("separat") || s.includes("running") || s.includes("voice")) return 2;
-  if (s.includes("export") || s.includes("completed")) return 3;
+  if (s.includes("export") || s.includes("completed") || s.includes("guardando") || s.includes("convirtiendo")) return 3;
+  if (s.includes("separa") || s.includes("cargando modelo") || s.includes("running") || s.includes("voice") || s.includes("ai ")) return 2;
+  if (s.includes("validat") || s.includes("extract") || s.includes("preparando") || s.includes("leyendo")) return 1;
+  if (s.includes("upload") || s.includes("starting") || s.includes("queued") || s.includes("preparing") || s.includes("cola")) return 0;
   return 0;
 }
 

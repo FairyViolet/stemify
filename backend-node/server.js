@@ -23,7 +23,8 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.use(express.json());
+// Large limit: the subtitle editor posts every word of the video as JSON.
+app.use(express.json({ limit: "20mb" }));
 
 app.get("/health", (req, res) => res.json({ status: "ok", runtime: "node" }));
 
@@ -40,8 +41,15 @@ startCleanupScheduler();
 app.listen(PORT, () => {
   console.log(`\n🎵 Stemify backend (Node.js) corriendo en http://localhost:${PORT}`);
   console.log(`   FFmpeg: bundled via ffmpeg-static ✓`);
+  console.log(`   Límite de subida: ${routes.MAX_UPLOAD_MB} MB`);
   const { checkDemucs } = require("./src/demucs");
   const demucs = checkDemucs();
   console.log(`   Demucs: ${demucs ? "disponible ✓" : "no disponible (instala Python + pip install demucs)"}`);
+  if (demucs) {
+    const { getAiInfo } = require("./src/demucs");
+    const ai = getAiInfo();
+    console.log(`   RoFormer: ${ai.roformer ? "disponible ✓" : "no instalado (ejecuta instalar_ia.bat)"}`);
+    console.log(`   Aceleración: ${ai.gpu ? `GPU ${ai.gpu} ✓` : "CPU (sin GPU NVIDIA detectada)"}${ai.torch ? ` · PyTorch ${ai.torch}` : ""}`);
+  }
   console.log();
 });
